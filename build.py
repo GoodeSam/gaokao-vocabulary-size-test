@@ -70,13 +70,23 @@ for r in rows:
     imp = 0.5 * math.log(r['freq']) / log_max + 0.5 * r['files'] / max_files
     r['imp'] = round(imp, 4)
 
-# Tier thresholds — match zhongkao cutoffs
+# Tier thresholds — computed per-corpus by quantile so gaokao's long C tail
+# doesn't balloon past zhongkao's 40% cap. Target: S≈10%, A≈20%, B≈30%, C≈40%.
+# (Zhongkao's hardcoded 0.59/0.33/0.17 cutoffs produce S:277 A:644 B:1249 C:2314
+#  on the 4484-word gaokao corpus — 52% C — which inflated vocab estimates.)
+imps_desc = sorted((r['imp'] for r in rows), reverse=True)
+N_rows = len(imps_desc)
+S_CUT = imps_desc[int(0.10 * N_rows)]
+A_CUT = imps_desc[int(0.30 * N_rows)]
+B_CUT = imps_desc[int(0.60 * N_rows)]
+print(f'Quantile-based tier cutoffs: S>={S_CUT:.4f} A>={A_CUT:.4f} B>={B_CUT:.4f}')
+
 def assign_tier(imp):
-    if imp >= 0.59:
+    if imp >= S_CUT:
         return 'S'
-    if imp >= 0.33:
+    if imp >= A_CUT:
         return 'A'
-    if imp >= 0.17:
+    if imp >= B_CUT:
         return 'B'
     return 'C'
 
@@ -303,6 +313,59 @@ html = html.replace(old_grade_order, new_grade_order)
 # ---------- Step 11: gradeVocab (z-score reference) stays aligned with thresholds ----------
 # Thresholds now mirror zhongkao for 小学~高中, so zhongkao's gradeVocab is correct here;
 # no replacement needed (the template already has these values).
+
+# ---------- Step 11b: vocab-estimate algorithm fixes (gaokao-specific) ----------
+# Background: the gaokao corpus has a much larger C tier (~40% of 4484 words vs
+# zhongkao's ~40% of 3098). The inherited linear-extrapolation estimator
+# (tierRate * tier.length) inflated results because:
+#   (a) SKIP_TOP=40 assumed-mastered was too generous for gaokao-level students;
+#   (b) genRound2's `alloc[t]||2` short-circuited the intended 0-allocation into 2,
+#       silently oversampling the wrong tier and throwing off the total question budget;
+#   (c) with only 1-2 C-tier samples, a single correct answer extrapolated to ~1800
+#       "mastered" C words, flooding the estimate.
+# Fixes applied here:
+#   (a) SKIP_TOP 40 -> 25
+#   (b) alloc[t]||2 -> alloc[t]??0
+#   (c) Bayesian shrinkage + tiny-n cap on C contribution
+
+# 11b.i: SKIP_TOP
+assert 'const SKIP_TOP=40;' in html, 'SKIP_TOP constant not found'
+html = html.replace('const SKIP_TOP=40;', 'const SKIP_TOP=25;')
+
+# 11b.ii: alloc fallback bug (|| vs ??)
+old_alloc = 'for(const w of pick(pool,alloc[t]||2)) qs.push(makeQ(w,2));'
+new_alloc = 'for(const w of pick(pool,alloc[t]??0)) qs.push(makeQ(w,2));'
+assert old_alloc in html, 'genRound2 alloc line not found'
+html = html.replace(old_alloc, new_alloc)
+
+# 11b.iii: estM loop — Bayesian shrinkage (K=2, P0=0.3) + C cap when n<2
+old_estM = (
+    '  // Estimated mastered words per tier (skipped top words count as mastered)\n'
+    '  const estM={};let totalM=SKIP_TOP;\n'
+    "  for(const t of['S','A','B','C']){\n"
+    '    estM[t]=Math.max(0,Math.round(byTier[t].length*Math.max(0,tierRates[t])));\n'
+    '    totalM+=estM[t];\n'
+    '  }'
+)
+new_estM = (
+    '  // Estimated mastered words per tier (skipped top words count as mastered).\n'
+    '  // Bayesian shrinkage r\' = (K*P0 + n*r)/(K+n) pulls small-sample tier rates\n'
+    '  // toward a mild prior so a lucky 1-of-1 on a big tier (especially C, ~1800 words)\n'
+    '  // cannot extrapolate into a massive inflated estimate. The extra cap on tier C\n'
+    '  // when n<2 protects against the worst single-sample pathological case.\n'
+    '  const K_SHRINK=1,P0=0.3,C_CAP_LOW_N=1100;\n'
+    '  const estM={};let totalM=SKIP_TOP;\n'
+    "  for(const t of['S','A','B','C']){\n"
+    '    const n=tierCounts[t];\n'
+    '    const r=Math.max(0,tierRates[t]);\n'
+    '    const rShrunk=(K_SHRINK*P0+n*r)/(K_SHRINK+n);\n'
+    '    estM[t]=Math.max(0,Math.round(byTier[t].length*rShrunk));\n'
+    "    if(t==='C'&&n<2) estM[t]=Math.min(estM[t],C_CAP_LOW_N);\n"
+    '    totalM+=estM[t];\n'
+    '  }'
+)
+assert old_estM in html, 'estM loop not found'
+html = html.replace(old_estM, new_estM)
 
 # ---------- Step 12: overflow tip threshold ----------
 # Keep at 4200 — warning is about test pool ceiling (4484 words) becoming unreliable,

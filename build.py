@@ -202,6 +202,29 @@ for old, new in replacements:
         continue
     html = html.replace(old, new)
 
+# Insert the prominent zhongkao-link button into the result page action area,
+# directly below the "再测一次" button.
+restart_block_old = (
+    '    <div class="txc mt14">\n'
+    '      <button class="btn btn-o" style="width:100%" onclick="restart()">'
+    '再测一次（换一批词）</button>\n'
+    '    </div>'
+)
+restart_block_new = (
+    '    <div class="txc mt14">\n'
+    '      <button class="btn btn-o" style="width:100%" onclick="restart()">'
+    '再测一次（换一批词）</button>\n'
+    '      <div style="margin-top:14px"><a href="https://goodesam.github.io/zhongkao-vocabulary-size-test/" '
+    'style="display:inline-block;padding:12px 26px;background:linear-gradient(135deg,var(--primary),#7c3aed);'
+    'color:#fff;font-size:16px;font-weight:800;text-decoration:none;border-radius:24px;'
+    'box-shadow:0 4px 16px rgba(67,97,238,.4);letter-spacing:.5px">→ 中考词汇诊断</a></div>\n'
+    '    </div>'
+)
+if restart_block_old in html:
+    html = html.replace(restart_block_old, restart_block_new)
+else:
+    print('WARN: restart block not found — skipped injecting report-page link')
+
 # Fix orphan references to the Zipf images (we removed the pictures above).
 orphan_pattern = (
     '<p style="margin-bottom:8px">上图由于对 Y 轴采用了对数坐标系，并不能准确地反映词频的真实状态。'

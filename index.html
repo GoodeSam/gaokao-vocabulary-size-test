@@ -980,15 +980,16 @@ function finishTest(){
 
   // Map vocabulary size to grade level
   function vocabToGrade(n){
-    if(n>=4200)return'高中3年级';if(n>=3600)return'高中2年级';if(n>=2900)return'高中1年级';
-    if(n>=2200)return'初中3年级';if(n>=1600)return'初中2年级';if(n>=1100)return'初中1年级';
-    if(n>=800)return'小学6年级';if(n>=550)return'小学5年级';if(n>=380)return'小学4年级';
-    if(n>=260)return'小学3年级';if(n>=160)return'小学2年级';return'小学1年级';
+    if(n>=4200)return'大学四级';if(n>=3500)return'高中3年级';if(n>=2800)return'高中2年级';
+    if(n>=2300)return'高中1年级';if(n>=1800)return'初中3年级';if(n>=1300)return'初中2年级';
+    if(n>=900)return'初中1年级';if(n>=700)return'小学6年级';if(n>=500)return'小学5年级';
+    if(n>=350)return'小学4年级';if(n>=250)return'小学3年级';if(n>=150)return'小学2年级';
+    return'小学1年级';
   }
   const equivGrade=vocabToGrade(totalM);
 
   // Compare vocab level with current grade
-  const gradeOrder=['小学1年级','小学2年级','小学3年级','小学4年级','小学5年级','小学6年级','初中1年级','初中2年级','初中3年级','高中1年级','高中2年级','高中3年级'];
+  const gradeOrder=['小学1年级','小学2年级','小学3年级','小学4年级','小学5年级','小学6年级','初中1年级','初中2年级','初中3年级','高中1年级','高中2年级','高中3年级','大学四级'];
   const curIdx=gradeOrder.indexOf(_stuGrade);
   const eqIdx=gradeOrder.indexOf(equivGrade);
   const diff=eqIdx-curIdx;
@@ -1008,7 +1009,7 @@ function finishTest(){
   }
 
   // ── Percentile ──
-  const gradeVocab={'小学1年级':[80,40],'小学2年级':[180,60],'小学3年级':[350,90],'小学4年级':[550,120],'小学5年级':[750,150],'小学6年级':[950,180],'初中1年级':[1300,220],'初中2年级':[1700,260],'初中3年级':[2100,300],'高中1年级':[2900,380],'高中2年级':[3600,420],'高中3年级':[4300,450]};
+  const gradeVocab={'小学1年级':[80,40],'小学2年级':[180,60],'小学3年级':[350,90],'小学4年级':[550,120],'小学5年级':[750,150],'小学6年级':[950,180],'初中1年级':[1300,220],'初中2年级':[1700,260],'初中3年级':[2100,300],'高中1年级':[2600,350],'高中2年级':[3100,380],'高中3年级':[3600,400]};
   function normalCDF(x){const t=1/(1+0.2316419*Math.abs(x)),p=t*(0.319381530+t*(-0.356563782+t*(1.781477937+t*(-1.821255978+1.330274429*t))));const v=1-p*Math.exp(-x*x/2)/Math.sqrt(2*Math.PI);return x>=0?v:1-v}
   let pctile=null;
   if(_stuGrade!=='其他'&&gradeVocab[_stuGrade]){

@@ -263,8 +263,9 @@ if restart_block_old in html:
 else:
     print('WARN: restart block not found — skipped re-targeting report-page link')
 
-# ---------- Step 9: replace vocabToGrade thresholds (gaokao-oriented) ----------
-# Old (zhongkao): upper bound at ~3500. We stretch the ceiling to the gaokao corpus size.
+# ---------- Step 9: replace vocabToGrade thresholds ----------
+# New mapping adds a top tier "大学四级" at ≥4200 (gaokao corpus ceiling is 4484),
+# with lower tiers mirroring zhongkao thresholds.
 old_grade_fn = (
     'function vocabToGrade(n){\n'
     "    if(n>=3500)return'高中3年级';if(n>=2800)return'高中2年级';if(n>=2400)return'高中1年级';\n"
@@ -275,32 +276,37 @@ old_grade_fn = (
 )
 new_grade_fn = (
     'function vocabToGrade(n){\n'
-    "    if(n>=4200)return'高中3年级';if(n>=3600)return'高中2年级';if(n>=2900)return'高中1年级';\n"
-    "    if(n>=2200)return'初中3年级';if(n>=1600)return'初中2年级';if(n>=1100)return'初中1年级';\n"
-    "    if(n>=800)return'小学6年级';if(n>=550)return'小学5年级';if(n>=380)return'小学4年级';\n"
-    "    if(n>=260)return'小学3年级';if(n>=160)return'小学2年级';return'小学1年级';\n"
+    "    if(n>=4200)return'大学四级';if(n>=3500)return'高中3年级';if(n>=2800)return'高中2年级';\n"
+    "    if(n>=2300)return'高中1年级';if(n>=1800)return'初中3年级';if(n>=1300)return'初中2年级';\n"
+    "    if(n>=900)return'初中1年级';if(n>=700)return'小学6年级';if(n>=500)return'小学5年级';\n"
+    "    if(n>=350)return'小学4年级';if(n>=250)return'小学3年级';if(n>=150)return'小学2年级';\n"
+    "    return'小学1年级';\n"
     '  }'
 )
 assert old_grade_fn in html, 'vocabToGrade function not found'
 html = html.replace(old_grade_fn, new_grade_fn)
 
-# ---------- Step 10: update gradeVocab percentile reference (gaokao-oriented) ----------
-old_vocab = (
-    "const gradeVocab={'小学1年级':[80,40],'小学2年级':[180,60],'小学3年级':[350,90],"
-    "'小学4年级':[550,120],'小学5年级':[750,150],'小学6年级':[950,180],"
-    "'初中1年级':[1300,220],'初中2年级':[1700,260],'初中3年级':[2100,300],"
-    "'高中1年级':[2600,350],'高中2年级':[3100,380],'高中3年级':[3600,400]};"
+# ---------- Step 10: extend gradeOrder to include 大学四级 ----------
+# Needed so diff=eqIdx-curIdx still works when equivGrade resolves to 大学四级.
+old_grade_order = (
+    "const gradeOrder=['小学1年级','小学2年级','小学3年级','小学4年级','小学5年级',"
+    "'小学6年级','初中1年级','初中2年级','初中3年级','高中1年级','高中2年级','高中3年级'];"
 )
-new_vocab = (
-    "const gradeVocab={'小学1年级':[80,40],'小学2年级':[180,60],'小学3年级':[350,90],"
-    "'小学4年级':[550,120],'小学5年级':[750,150],'小学6年级':[950,180],"
-    "'初中1年级':[1300,220],'初中2年级':[1700,260],'初中3年级':[2100,300],"
-    "'高中1年级':[2900,380],'高中2年级':[3600,420],'高中3年级':[4300,450]};"
+new_grade_order = (
+    "const gradeOrder=['小学1年级','小学2年级','小学3年级','小学4年级','小学5年级',"
+    "'小学6年级','初中1年级','初中2年级','初中3年级','高中1年级','高中2年级','高中3年级',"
+    "'大学四级'];"
 )
-assert old_vocab in html, 'gradeVocab literal not found'
-html = html.replace(old_vocab, new_vocab)
+assert old_grade_order in html, 'gradeOrder array not found'
+html = html.replace(old_grade_order, new_grade_order)
 
-# ---------- Step 11: update overflow tip threshold (2800 → ~4200) ----------
+# ---------- Step 11: gradeVocab (z-score reference) stays aligned with thresholds ----------
+# Thresholds now mirror zhongkao for 小学~高中, so zhongkao's gradeVocab is correct here;
+# no replacement needed (the template already has these values).
+
+# ---------- Step 12: overflow tip threshold ----------
+# Keep at 4200 — warning is about test pool ceiling (4484 words) becoming unreliable,
+# which conveniently aligns with the 大学四级 threshold.
 html = html.replace(
     'if(totalM>2800){',
     'if(totalM>4200){',

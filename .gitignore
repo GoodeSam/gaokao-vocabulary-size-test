@@ -1,0 +1,9 @@
+# Local environment / editor state
+.DS_Store
+.claude/
+.venv/
+
+# Source data and working notes — not part of the shipped app
+*.xlsx
+gaokaoWordsTest.md
+words_data.json

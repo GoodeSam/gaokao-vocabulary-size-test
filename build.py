@@ -9,15 +9,25 @@ Writes:
   - /Users/victor/projects/高考词汇量测试/index.html
   - /Users/victor/projects/高考词汇量测试/words_data.json (reference export)
 """
+import base64
+import io
 import json
 import math
 import re
 import openpyxl
+from PIL import Image
 
 SRC_XLSX = '/Users/victor/projects/高考词汇量测试/土妹高考词汇4509-20260304版.xlsx'
 TEMPLATE_HTML = '/Users/victor/projects/中考词汇量测试/index.html'
 OUT_HTML = '/Users/victor/projects/高考词汇量测试/index.html'
 OUT_JSON = '/Users/victor/projects/高考词汇量测试/words_data.json'
+
+# Zipf charts (gaokao-specific). PNGs are pre-generated via duishu.py / test.py;
+# this script compresses them to WebP in-memory and injects them into the
+# template (replacing the zhongkao charts).
+ZIPF_LOGY_PNG = '/Users/victor/projects/高考词汇量测试/zipf_gaokao_wordfreq_logy_smooth_16_9.png'
+ZIPF_LINEAR_PNG = '/Users/victor/projects/高考词汇量测试/zipf_gaokao_wordfreq_smooth_9_16.png'
+WEBP_QUALITY = 82
 
 # ---------- Step 1: parse xlsx ----------
 wb = openpyxl.load_workbook(SRC_XLSX, data_only=True)
@@ -112,15 +122,34 @@ m = re.search(r"const W=\[.*?\];\n", html, flags=re.DOTALL)
 assert m, 'W array block not found in template'
 html = html[:m.start()] + W_JS + '\n' + html[m.end():]
 
-# ---------- Step 7: strip large base64 images (keep template lean) ----------
-# There are two <img src="data:image/webp;base64,..."> instances in the welcome cards.
-# Replace each with a clean placeholder block.
+# ---------- Step 7: swap inline Zipf charts from zhongkao → gaokao ----------
+# Template has two <img src="data:image/webp;base64,...">: first is the log-y 16:9
+# chart, second is the linear 9:16 chart. Replace only the base64 payload so the
+# surrounding sizing/CSS attrs are preserved exactly.
+def _png_to_webp_b64(png_path, quality=WEBP_QUALITY):
+    im = Image.open(png_path)
+    buf = io.BytesIO()
+    im.save(buf, 'WEBP', quality=quality, method=6)
+    return base64.b64encode(buf.getvalue()).decode('ascii')
+
+gaokao_charts_b64 = [_png_to_webp_b64(ZIPF_LOGY_PNG), _png_to_webp_b64(ZIPF_LINEAR_PNG)]
+_chart_idx = [0]
+
+def _swap_chart(m):
+    i = _chart_idx[0]
+    if i >= len(gaokao_charts_b64):
+        return m.group(0)
+    _chart_idx[0] += 1
+    prefix, suffix = m.group(1), m.group(2)
+    return f'{prefix}{gaokao_charts_b64[i]}{suffix}'
+
 html, n_imgs = re.subn(
-    r'<div style="display:flex;justify-content:center;margin:12px 0"><img src="data:image/webp;base64,[^"]+"[^>]*></div>',
-    '',
-    html
+    r'(<img src="data:image/webp;base64,)[^"]+(")',
+    _swap_chart,
+    html,
 )
-print(f'Stripped {n_imgs} inline Zipf image(s).')
+print(f'Swapped {n_imgs} inline Zipf image(s) to gaokao charts.')
+assert _chart_idx[0] == 2, f'expected 2 inline charts to swap, got {_chart_idx[0]}'
 
 # ---------- Step 8: text replacements ----------
 replacements = [
@@ -144,11 +173,16 @@ replacements = [
     ('<div class="n">142</div><div class="l">真题试卷来源</div>',
      '<div class="n">84</div><div class="l">真题试卷来源</div>'),
 
-    # Footer (template string already had 中考词汇智能诊断 which was swapped, so match the partially-swapped form)
-    ('<div class="footer">高考词汇智能诊断 &middot; 142套全国中考真题 &middot; 3098词</div>',
-     f'<div class="footer">高考词汇智能诊断 &middot; 84套全国高考真题 &middot; {len(rows)}词\n'
-     f'    <div style="margin-top:14px"><a href="https://goodesam.github.io/zhongkao-vocabulary-size-test/" style="display:inline-block;padding:10px 22px;background:linear-gradient(135deg,var(--primary),#7c3aed);color:#fff;font-size:15px;font-weight:800;text-decoration:none;border-radius:22px;box-shadow:0 4px 14px rgba(67,97,238,.35);letter-spacing:.5px">→ 中考词汇诊断</a></div>\n'
-     f'  </div>'),
+    # Footer: zhongkao template now already embeds a "→ 高考词汇诊断" button.
+    # Swap stats (142→84, 3098→{len}) and flip the cross-link (→ zhongkao).
+    (
+        '<div class="footer">高考词汇智能诊断 &middot; 142套全国中考真题 &middot; 3098词\n'
+        '    <div style="margin-top:14px"><a href="https://goodesam.github.io/gaokao-vocabulary-size-test/" style="display:inline-block;padding:10px 22px;background:linear-gradient(135deg,var(--primary),#7c3aed);color:#fff;font-size:15px;font-weight:800;text-decoration:none;border-radius:22px;box-shadow:0 4px 14px rgba(67,97,238,.35);letter-spacing:.5px">→ 高考词汇诊断</a></div>\n'
+        '  </div>',
+        f'<div class="footer">高考词汇智能诊断 &middot; 84套全国高考真题 &middot; {len(rows)}词\n'
+        f'    <div style="margin-top:14px"><a href="https://goodesam.github.io/zhongkao-vocabulary-size-test/" style="display:inline-block;padding:10px 22px;background:linear-gradient(135deg,var(--primary),#7c3aed);color:#fff;font-size:15px;font-weight:800;text-decoration:none;border-radius:22px;box-shadow:0 4px 14px rgba(67,97,238,.35);letter-spacing:.5px">→ 中考词汇诊断</a></div>\n'
+        f'  </div>'
+    ),
 
     # Reports / CTA copy
     ('// ══════ 4. 中考题型风险卡 ══════', '// ══════ 4. 高考题型风险卡 ══════'),
@@ -202,12 +236,16 @@ for old, new in replacements:
         continue
     html = html.replace(old, new)
 
-# Insert the prominent zhongkao-link button into the result page action area,
-# directly below the "再测一次" button.
+# Report-page cross-link: zhongkao template already has a "→ 高考词汇诊断" button
+# below the "再测一次" button. Flip it to point to zhongkao for the gaokao site.
 restart_block_old = (
     '    <div class="txc mt14">\n'
     '      <button class="btn btn-o" style="width:100%" onclick="restart()">'
     '再测一次（换一批词）</button>\n'
+    '      <div style="margin-top:14px"><a href="https://goodesam.github.io/gaokao-vocabulary-size-test/" '
+    'style="display:inline-block;padding:12px 26px;background:linear-gradient(135deg,var(--primary),#7c3aed);'
+    'color:#fff;font-size:16px;font-weight:800;text-decoration:none;border-radius:24px;'
+    'box-shadow:0 4px 16px rgba(67,97,238,.4);letter-spacing:.5px">→ 高考词汇诊断</a></div>\n'
     '    </div>'
 )
 restart_block_new = (
@@ -223,19 +261,7 @@ restart_block_new = (
 if restart_block_old in html:
     html = html.replace(restart_block_old, restart_block_new)
 else:
-    print('WARN: restart block not found — skipped injecting report-page link')
-
-# Fix orphan references to the Zipf images (we removed the pictures above).
-orphan_pattern = (
-    '<p style="margin-bottom:8px">上图由于对 Y 轴采用了对数坐标系，并不能准确地反映词频的真实状态。'
-    '如果采用普通坐标系，单词词频分布是下图：</p>'
-)
-orphan_replace = (
-    '<p style="margin-bottom:8px">词频分布高度倾斜：前 500 个高频词在真题中反复出现，'
-    '而后段数千个低频词整体只零星出现几次。</p>'
-)
-if orphan_pattern in html:
-    html = html.replace(orphan_pattern, orphan_replace)
+    print('WARN: restart block not found — skipped re-targeting report-page link')
 
 # ---------- Step 9: replace vocabToGrade thresholds (gaokao-oriented) ----------
 # Old (zhongkao): upper bound at ~3500. We stretch the ceiling to the gaokao corpus size.

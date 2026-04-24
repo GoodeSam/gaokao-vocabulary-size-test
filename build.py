@@ -147,7 +147,7 @@ replacements = [
     # Footer (template string already had 中考词汇智能诊断 which was swapped, so match the partially-swapped form)
     ('<div class="footer">高考词汇智能诊断 &middot; 142套全国中考真题 &middot; 3098词</div>',
      f'<div class="footer">高考词汇智能诊断 &middot; 84套全国高考真题 &middot; {len(rows)}词\n'
-     f'    <div style="margin-top:6px"><a href="https://goodesam.github.io/zhongkao-vocabulary-size-test/" style="color:var(--primary);text-decoration:none">中考词汇诊断</a></div>\n'
+     f'    <div style="margin-top:14px"><a href="https://goodesam.github.io/zhongkao-vocabulary-size-test/" style="display:inline-block;padding:10px 22px;background:linear-gradient(135deg,var(--primary),#7c3aed);color:#fff;font-size:15px;font-weight:800;text-decoration:none;border-radius:22px;box-shadow:0 4px 14px rgba(67,97,238,.35);letter-spacing:.5px">→ 中考词汇诊断</a></div>\n'
      f'  </div>'),
 
     # Reports / CTA copy

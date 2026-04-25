@@ -35,7 +35,7 @@ ws = wb['Sheet']
 
 rows = []
 for r in ws.iter_rows(min_row=3, values_only=True):
-    word, phon, cn, freq, files, flag, top_forms = r
+    word, phon, cn, freq, files, _flag, _top_forms = r  # last two cols intentionally unused
     if not word or not cn or not freq or not files:
         continue
     word = str(word).strip()
@@ -96,6 +96,12 @@ for r in rows:
 from collections import Counter
 tier_ct = Counter(r['tier'] for r in rows)
 print('Tier distribution:', dict(tier_ct))
+
+# Sanity: ties at quantile boundaries can drift tier sizes; alert if it gets bad.
+_TARGET_PCT = {'S': 10, 'A': 20, 'B': 30, 'C': 40}
+for _t, _target in _TARGET_PCT.items():
+    _actual = tier_ct[_t] / N_rows * 100
+    assert abs(_actual - _target) <= 5, f'Tier {_t} drifted: {_actual:.1f}% vs target {_target}% (>5pp)'
 
 # Report Zipf anchor samples at ranks 1, 1000, 2000, 3000, 4000
 anchors = {}
@@ -485,6 +491,109 @@ new_round3 = (
 )
 assert old_round3 in html, 'genRound3 rem not found'
 html = html.replace(old_round3, new_round3)
+
+# 11b.vii: R2 budget reservation — without it, the wrongS re-test items pushed at the
+# bottom of genRound2 inflate the round past 14 questions (and the total past 35).
+# This replacement runs AFTER 11b.iv (wrongS bug fix) and 11b.vi (R2 alloc bump),
+# so it matches the post-fix text. Reserve up to 2 slots for re-tests by deducting
+# from the highest-allocated tier so the round still totals 14.
+old_r2_budget = (
+    '  const alloc={[ranked[0]]:6,[ranked[1]]:4,[ranked[2]]:3,[ranked[3]]:1};\n'
+    '  const used=new Set(Q.ans.map(a=>a.word.w));\n'
+    '  const excl=w=>used.has(w.w)||_historyWords.has(w.w);\n'
+    '  const qs=[];\n'
+    "  for(const t of['S','A','B','C']){\n"
+    '    const pool=byTier[t].filter(w=>w.cn&&!excl(w));\n'
+    '    for(const w of pick(pool,alloc[t]??0)) qs.push(makeQ(w,2));\n'
+    '  }\n'
+    '  // Extra confirmation for wrong S-tier words from round 1 (re-test current-session words).\n'
+    "  // wrongS items come FROM Q.ans/`used`, so the legacy `!used.has(...)` filter would have made\n"
+    '  // both the candidate selection and the dedup check always false — disabling the re-test entirely.\n'
+    "  const wrongS=Q.ans.filter(a=>a.tier==='S'&&a.score<0.5);\n"
+    '  for(const a of wrongS.slice(0,2)){\n'
+    '    qs.push(makeQ(a.word,2));\n'
+    '  }'
+)
+new_r2_budget = (
+    '  const alloc={[ranked[0]]:6,[ranked[1]]:4,[ranked[2]]:3,[ranked[3]]:1};\n'
+    '  // Reserve up to 2 slots for re-testing wrong S-tier words from round 1 by\n'
+    '  // deducting from the highest-allocated tier; the round still totals 14 questions.\n'
+    "  const wrongS=Q.ans.filter(a=>a.tier==='S'&&a.score<0.5).slice(0,2);\n"
+    '  alloc[ranked[0]]=Math.max(0,alloc[ranked[0]]-wrongS.length);\n'
+    '  const used=new Set(Q.ans.map(a=>a.word.w));\n'
+    '  const excl=w=>used.has(w.w)||_historyWords.has(w.w);\n'
+    '  const qs=[];\n'
+    "  for(const t of['S','A','B','C']){\n"
+    '    const pool=byTier[t].filter(w=>w.cn&&!excl(w));\n'
+    '    for(const w of pick(pool,alloc[t]??0)) qs.push(makeQ(w,2));\n'
+    '  }\n'
+    '  for(const a of wrongS){\n'
+    '    qs.push(makeQ(a.word,2));\n'
+    '  }'
+)
+assert old_r2_budget in html, 'genRound2 post-fix block not found (R2 budget reservation)'
+html = html.replace(old_r2_budget, new_r2_budget)
+
+# 11b.viii: studyStartRank misses SKIP_TOP — totalM includes SKIP_TOP, so the
+# study-start rank advice was offset 25 words too early.
+assert '  let studyStartRank=0;' in html, 'studyStartRank initializer not found'
+html = html.replace('  let studyStartRank=0;', '  let studyStartRank=SKIP_TOP;')
+
+# 11b.ix: coverage uses raw tierRates which can be negative (wrong=-0.3). estM clamps
+# to non-negative; coverage should too, otherwise scoring behavior is inconsistent.
+old_cov = "  for(const t of['S','A','B','C']) covFreq+=tierRates[t]*tierFreq[t];"
+new_cov = "  for(const t of['S','A','B','C']) covFreq+=Math.max(0,tierRates[t])*tierFreq[t];"
+assert old_cov in html, 'coverage loop not found'
+html = html.replace(old_cov, new_cov)
+
+# 11b.x: startWord and nearbyWords are computed but never read anywhere in the
+# rendered report — pure dead code from an unfinished feature.
+old_dead = (
+    '  // The word at that rank\n'
+    '  const startWord=studyStartRank>0&&studyStartRank<=WORDS.length?WORDS[studyStartRank-1]:null;\n'
+    '  // Also find a few words around that position for context\n'
+    '  const nearbyWords=WORDS.slice(Math.max(0,studyStartRank-3),Math.min(WORDS.length,studyStartRank+7));\n'
+    '\n'
+)
+assert old_dead in html, 'studyStart dead-code block not found'
+html = html.replace(old_dead, '')
+
+# 11b.xi: showAll() tries to remove `.show-all-btn` but the button has no such
+# class — the cleanup branch never executes. Add the class so it works.
+old_btn = (
+    '<button class="btn btn-o" style="width:auto;padding:6px 16px;font-size:12px"\n'
+    '        onclick="showAll()">'
+)
+new_btn = (
+    '<button class="btn btn-o show-all-btn" style="width:auto;padding:6px 16px;font-size:12px"\n'
+    '        onclick="showAll()">'
+)
+assert old_btn in html, 'show-all button markup not found'
+html = html.replace(old_btn, new_btn)
+
+# 11b.xii: extract TIERS constant. Done LAST so prior text replacements still match
+# the legacy ['S','A','B','C'] literal. Patches must run in order:
+#   1) .sort() — mutating, replace with [...TIERS].sort() to avoid clobbering
+#   2) `of['S','A','B','C']` → `of TIERS` (note added space — original had `of[`)
+#   3) `${['S','A','B','C'].map(` → `${TIERS.map(`
+#   4) Insert the const TIERS declaration AFTER the wholesale replace, so the
+#      replacement doesn't recurse into the literal inside the const itself.
+old_sort = "const ranked=['S','A','B','C'].sort("
+new_sort = 'const ranked=[...TIERS].sort('
+assert old_sort in html, 'ranked.sort line not found'
+html = html.replace(old_sort, new_sort)
+
+_n_of = html.count("of['S','A','B','C']")
+html = html.replace("of['S','A','B','C']", 'of TIERS')
+_n_map = html.count("['S','A','B','C'].map(")
+html = html.replace("['S','A','B','C'].map(", 'TIERS.map(')
+assert "['S','A','B','C']" not in html, 'Unexpected residual tier literal'
+
+html = html.replace(
+    'const SKIP_TOP=25;',
+    "const TIERS=Object.freeze(['S','A','B','C']);\nconst SKIP_TOP=25;",
+)
+print(f'Replaced {_n_of + _n_map + 1} legacy tier-array literals with TIERS constant')
 
 # ---------- Step 12: overflow tip threshold ----------
 # Keep at 4200 — warning is about test pool ceiling (4484 words) becoming unreliable,

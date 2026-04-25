@@ -380,7 +380,7 @@ new_estM = (
     '  }\n'
     '  const _totalMargin=Math.round(Math.sqrt(_ciVarSum));\n'
     '  const totalM_low=Math.max(SKIP_TOP, totalM-_totalMargin);\n'
-    '  const totalM_high=Math.min(SKIP_TOP+WORDS.length, totalM+_totalMargin);'
+    '  const totalM_high=Math.min(WORDS.length, totalM+_totalMargin);'
 )
 assert old_estM in html, 'estM loop not found'
 html = html.replace(old_estM, new_estM)
@@ -575,18 +575,28 @@ new_study = (
     '  // so weak-on-S strong-on-C students got told to skip past their high-freq gap.\n'
     '  // New logic: walk tiers in frequency order; the first tier where the shrunken rate\n'
     "  // drops below STUDY_THRESHOLD is where to focus. That tier's first-rank position\n"
-    '  // is the recommended study start.\n'
+    '  // is the recommended study start. _targetTier is null when all tiers passed.\n'
     '  const STUDY_THRESHOLD=0.7;\n'
     '  let studyStartRank=WORDS.length;\n'
     '  let _cumRank=SKIP_TOP;\n'
+    '  let _targetTier=null;\n'
     "  for(const t of['S','A','B','C']){\n"
     '    if(rShrunkByTier[t]<STUDY_THRESHOLD){\n'
     '      studyStartRank=_cumRank+1;\n'
+    '      _targetTier=t;\n'
     '      break;\n'
     '    }\n'
     '    _cumRank+=byTier[t].length;\n'
     '  }\n'
-    '  studyStartRank=Math.min(studyStartRank, WORDS.length);'
+    '  studyStartRank=Math.min(studyStartRank, WORDS.length);\n'
+    '  // Build study-message strings tied to the actual gap tier so the UI no longer\n'
+    '  // hardcodes "优先攻克 S·核心 和 A·常见" when the gap is in B/C or all tiers passed.\n'
+    "  const _tierFocusName={S:'S·核心 和 A·常见',A:'A·常见 和 B·中频',B:'B·中频',C:'C·低频'};\n"
+    "  const _tierHeadName={S:'高频',A:'高频',B:'中频',C:'低频'};\n"
+    "  const _studyHeadline=_targetTier===null?'你已通关：所有频段达标':('第1周：补齐'+_tierHeadName[_targetTier]+'盲区');\n"
+    "  const _studyMsg=_targetTier===null\n"
+    "    ?'你的高考词汇已全面达标，建议进入四六级/考研词汇阶段，并保持每日复习节奏防止遗忘。'\n"
+    "    :('从词频表第 <b>'+studyStartRank+'</b> 位开始，每天学习 20-30 个新词，优先攻克 '+_tierFocusName[_targetTier]+' 层级的薄弱词汇。');"
 )
 assert old_study in html, 'studyStartRank block not found (template may have changed)'
 html = html.replace(old_study, new_study)
@@ -713,6 +723,25 @@ new_cover = (
 )
 assert old_cover in html, 'cover card totalM display not found'
 html = html.replace(old_cover, new_cover)
+
+# 11b.xvii: study-card header + body now follow the actual gap tier instead of
+# hardcoding "S·核心 和 A·常见" and "第1周：补齐高频盲区". When the student
+# already passed every tier (studyStartRank === WORDS.length), show a "通关"
+# message rather than the contradictory "从第4484位开始 ... 攻克 S/A".
+old_study_card_head = '<b style="color:#10b981">第1周：补齐高频盲区</b>'
+new_study_card_head = '<b style="color:#10b981">${_studyHeadline}</b>'
+assert old_study_card_head in html, 'study card header not found'
+html = html.replace(old_study_card_head, new_study_card_head)
+
+old_study_card_body = (
+    '<span style="color:var(--gray);font-size:12px">从词频表第 <b>${studyStartRank}</b> 位开始，'
+    '每天学习 20-30 个高频词，优先攻克 S·核心 和 A·常见 层级的薄弱词汇。</span>'
+)
+new_study_card_body = (
+    '<span style="color:var(--gray);font-size:12px">${_studyMsg}</span>'
+)
+assert old_study_card_body in html, 'study card body span not found'
+html = html.replace(old_study_card_body, new_study_card_body)
 
 # ---------- Step 12: overflow tip threshold ----------
 # Keep at 4200 — warning is about test pool ceiling (4484 words) becoming unreliable,

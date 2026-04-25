@@ -943,7 +943,7 @@ function finishTest(){
   }
   const _totalMargin=Math.round(Math.sqrt(_ciVarSum));
   const totalM_low=Math.max(SKIP_TOP, totalM-_totalMargin);
-  const totalM_high=Math.min(SKIP_TOP+WORDS.length, totalM+_totalMargin);
+  const totalM_high=Math.min(WORDS.length, totalM+_totalMargin);
 
   // Coverage score — skipped top words are assumed mastered (100% coverage)
   const tierFreq={S:0,A:0,B:0,C:0};
@@ -993,18 +993,28 @@ function finishTest(){
   // so weak-on-S strong-on-C students got told to skip past their high-freq gap.
   // New logic: walk tiers in frequency order; the first tier where the shrunken rate
   // drops below STUDY_THRESHOLD is where to focus. That tier's first-rank position
-  // is the recommended study start.
+  // is the recommended study start. _targetTier is null when all tiers passed.
   const STUDY_THRESHOLD=0.7;
   let studyStartRank=WORDS.length;
   let _cumRank=SKIP_TOP;
+  let _targetTier=null;
   for(const t of TIERS){
     if(rShrunkByTier[t]<STUDY_THRESHOLD){
       studyStartRank=_cumRank+1;
+      _targetTier=t;
       break;
     }
     _cumRank+=byTier[t].length;
   }
   studyStartRank=Math.min(studyStartRank, WORDS.length);
+  // Build study-message strings tied to the actual gap tier so the UI no longer
+  // hardcodes "优先攻克 S·核心 和 A·常见" when the gap is in B/C or all tiers passed.
+  const _tierFocusName={S:'S·核心 和 A·常见',A:'A·常见 和 B·中频',B:'B·中频',C:'C·低频'};
+  const _tierHeadName={S:'高频',A:'高频',B:'中频',C:'低频'};
+  const _studyHeadline=_targetTier===null?'你已通关：所有频段达标':('第1周：补齐'+_tierHeadName[_targetTier]+'盲区');
+  const _studyMsg=_targetTier===null
+    ?'你的高考词汇已全面达标，建议进入四六级/考研词汇阶段，并保持每日复习节奏防止遗忘。'
+    :('从词频表第 <b>'+studyStartRank+'</b> 位开始，每天学习 20-30 个新词，优先攻克 '+_tierFocusName[_targetTier]+' 层级的薄弱词汇。');
   // Map vocabulary size to grade level
   function vocabToGrade(n){
     if(n>=4200)return'大学四级';if(n>=3500)return'高中3年级';if(n>=2800)return'高中2年级';
@@ -1178,8 +1188,8 @@ function finishTest(){
     <div class="card-t" style="color:var(--ok)">你的专属提分路线图</div>
     <div style="font-size:13px;color:var(--txt);line-height:1.8">
       <div style="padding:10px 12px;background:#ecfdf5;border-radius:8px;margin-bottom:8px">
-        <b style="color:#10b981">第1周：补齐高频盲区</b><br>
-        <span style="color:var(--gray);font-size:12px">从词频表第 <b>${studyStartRank}</b> 位开始，每天学习 20-30 个高频词，优先攻克 S·核心 和 A·常见 层级的薄弱词汇。</span>
+        <b style="color:#10b981">${_studyHeadline}</b><br>
+        <span style="color:var(--gray);font-size:12px">${_studyMsg}</span>
       </div>
       <div style="padding:10px 12px;background:#eff6ff;border-radius:8px;margin-bottom:8px">
         <b style="color:#4361ee">第2-4周：提速训练 + 易混词辨析</b><br>

@@ -449,6 +449,43 @@ new_showq_head = (
 assert old_showq_head in html, 'showQ() head not found'
 html = html.replace(old_showq_head, new_showq_head)
 
+# 11b.vi: switch from TEST MODE (15 Qs) to production allocations (35 Qs total
+# = 14+14+7). The UI already advertises 14/14/7 to users, so this also fixes a
+# visible inconsistency. More samples per tier also lets the Bayesian shrinkage
+# converge closer to true rates, reducing residual estimation error.
+old_round1 = (
+    '  // TEST MODE: 6 questions (normally 14: 4S,4A,3B,3C)\n'
+    '  const alloc={S:2,A:2,B:1,C:1};'
+)
+new_round1 = (
+    '  // 14 questions: broad scan across all tiers (4S, 4A, 3B, 3C).\n'
+    '  const alloc={S:4,A:4,B:3,C:3};'
+)
+assert old_round1 in html, 'genRound1 alloc not found'
+html = html.replace(old_round1, new_round1)
+
+old_round2 = (
+    '  // TEST MODE: 6 questions (normally 14: 6,4,3,1)\n'
+    '  const alloc={[ranked[0]]:3,[ranked[1]]:2,[ranked[2]]:1,[ranked[3]]:0};'
+)
+new_round2 = (
+    '  // 14 questions weighted by rate-to-0.55 closeness (focus probe: 6,4,3,1).\n'
+    '  const alloc={[ranked[0]]:6,[ranked[1]]:4,[ranked[2]]:3,[ranked[3]]:1};'
+)
+assert old_round2 in html, 'genRound2 alloc not found'
+html = html.replace(old_round2, new_round2)
+
+old_round3 = (
+    '  // TEST MODE: 3 questions (normally 7)\n'
+    '  const qs=[];let rem=3;'
+)
+new_round3 = (
+    '  // 7 questions targeting weak tiers from rounds 1-2 (gap confirmation).\n'
+    '  const qs=[];let rem=7;'
+)
+assert old_round3 in html, 'genRound3 rem not found'
+html = html.replace(old_round3, new_round3)
+
 # ---------- Step 12: overflow tip threshold ----------
 # Keep at 4200 — warning is about test pool ceiling (4484 words) becoming unreliable,
 # which conveniently aligns with the 大学四级 threshold.

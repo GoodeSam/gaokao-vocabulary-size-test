@@ -585,8 +585,8 @@ function makeQ(word,round){
 }
 
 function genRound1(){
-  // TEST MODE: 6 questions (normally 14: 4S,4A,3B,3C)
-  const alloc={S:2,A:2,B:1,C:1};
+  // 14 questions: broad scan across all tiers (4S, 4A, 3B, 3C).
+  const alloc={S:4,A:4,B:3,C:3};
   const qs=[];
   for(const t of['S','A','B','C']){
     const pool=byTier[t].filter(w=>w.cn&&!_historyWords.has(w.w));
@@ -603,8 +603,8 @@ function genRound2(){
   }
   // Rank tiers by closeness to fuzzy zone center (0.55)
   const ranked=['S','A','B','C'].sort((a,b)=>Math.abs(rates[a]-.55)-Math.abs(rates[b]-.55));
-  // TEST MODE: 6 questions (normally 14: 6,4,3,1)
-  const alloc={[ranked[0]]:3,[ranked[1]]:2,[ranked[2]]:1,[ranked[3]]:0};
+  // 14 questions weighted by rate-to-0.55 closeness (focus probe: 6,4,3,1).
+  const alloc={[ranked[0]]:6,[ranked[1]]:4,[ranked[2]]:3,[ranked[3]]:1};
   const used=new Set(Q.ans.map(a=>a.word.w));
   const excl=w=>used.has(w.w)||_historyWords.has(w.w);
   const qs=[];
@@ -628,8 +628,8 @@ function genRound3(){
   const wrongByTier={};
   Q.ans.filter(a=>a.score<0.5).forEach(a=>{wrongByTier[a.tier]=(wrongByTier[a.tier]||0)+1});
   const sorted=Object.entries(wrongByTier).sort((a,b)=>b[1]-a[1]);
-  // TEST MODE: 3 questions (normally 7)
-  const qs=[];let rem=3;
+  // 7 questions targeting weak tiers from rounds 1-2 (gap confirmation).
+  const qs=[];let rem=7;
   for(const[t]of sorted){
     if(rem<=0)break;
     const cnt=Math.min(rem,4);

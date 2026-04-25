@@ -172,8 +172,10 @@ replacements = [
     # Page chrome
     ('你的中考词汇够用吗？', '你的高考词汇够用吗？'),
     ('142套中考真题告诉你答案', '84套高考真题告诉你答案'),
+    # Title and report headers are covered by the broader 中考词汇智能诊断 substring rule above;
+    # the explicit longer entries used to live here as belt-and-suspenders but their text no
+    # longer survives the substring pass, so they were removed (the loop below now fail-fasts).
     ('中考词汇智能诊断', '高考词汇智能诊断'),
-    ('<title>中考词汇智能诊断</title>', '<title>高考词汇智能诊断</title>'),
     ('为什么这个测试和你的中考成绩直接相关？', '为什么这个测试和你的高考成绩直接相关？'),
 
     # Welcome body copy
@@ -218,7 +220,8 @@ replacements = [
     ('#中考词汇挑战', '#高考词汇挑战'),
     ('扫码测测你的中考词汇量', '扫码测测你的高考词汇量'),
     ('中考词汇测试-邀请好友.png', '高考词汇测试-邀请好友.png'),
-    ('中考词汇智能诊断报告', '高考词汇智能诊断报告'),
+    # 中考词汇智能诊断报告 already gets rewritten to 高考词汇智能诊断报告 by the broader
+    # 中考词汇智能诊断 substring rule above; the explicit entry would never match.
     ('基于142套全国中考真题词频数据', '基于84套全国高考真题词频数据'),
     ('中考词汇诊断报告.png', '高考词汇诊断报告.png'),
     ('<b>数据来源</b>：142 份全国各省中考真题，提取 3098 个考试词汇及词频',
@@ -247,9 +250,9 @@ replacements = [
 ]
 
 for old, new in replacements:
-    if old not in html:
-        print(f'WARN: replacement not found → {old[:80]!r}')
-        continue
+    # Some later entries match text produced by earlier substring rules in this
+    # same loop, so check at iteration time rather than upfront.
+    assert old in html, f'Template drift — replacement no longer matches: {old[:80]!r}'
     html = html.replace(old, new)
 
 # Report-page cross-link: zhongkao template already has a "→ 高考词汇诊断" button
@@ -589,11 +592,40 @@ _n_map = html.count("['S','A','B','C'].map(")
 html = html.replace("['S','A','B','C'].map(", 'TIERS.map(')
 assert "['S','A','B','C']" not in html, 'Unexpected residual tier literal'
 
+_skip_anchor = 'const SKIP_TOP=25;'
+assert _skip_anchor in html, (
+    'TIERS injection anchor missing — without insertion the literal-to-TIERS\n'
+    'rewrites above would leave dangling references and the page would throw\n'
+    'ReferenceError at startup.'
+)
 html = html.replace(
-    'const SKIP_TOP=25;',
-    "const TIERS=Object.freeze(['S','A','B','C']);\nconst SKIP_TOP=25;",
+    _skip_anchor,
+    "const TIERS=Object.freeze(['S','A','B','C']);\n" + _skip_anchor,
 )
 print(f'Replaced {_n_of + _n_map + 1} legacy tier-array literals with TIERS constant')
+
+# 11b.xiii: tier-rate display/export was not clamping to ≥0, so wrong answers
+# (score=-0.3) could surface as negative percent in tier cards and _reportStats —
+# inconsistent with the coverage clamp added in 11b.ix and the estM clamp.
+old_tier_pct = '        const r=Math.round(tierRates[t]*100);'
+new_tier_pct = '        const r=Math.round(Math.max(0,tierRates[t])*100);'
+assert old_tier_pct in html, 'tier-card percent line not found'
+html = html.replace(old_tier_pct, new_tier_pct)
+
+old_export = (
+    "    tiers:{S:Math.round(tierRates['S']*100),"
+    "A:Math.round(tierRates['A']*100),"
+    "B:Math.round(tierRates['B']*100),"
+    "C:Math.round(tierRates['C']*100)}};"
+)
+new_export = (
+    "    tiers:{S:Math.round(Math.max(0,tierRates['S'])*100),"
+    "A:Math.round(Math.max(0,tierRates['A'])*100),"
+    "B:Math.round(Math.max(0,tierRates['B'])*100),"
+    "C:Math.round(Math.max(0,tierRates['C'])*100)}};"
+)
+assert old_export in html, '_reportStats tiers export not found'
+html = html.replace(old_export, new_export)
 
 # ---------- Step 12: overflow tip threshold ----------
 # Keep at 4200 — warning is about test pool ceiling (4484 words) becoming unreliable,

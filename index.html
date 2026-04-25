@@ -1091,7 +1091,7 @@ function finishTest(){
     </div>
     <div class="tier-g" style="margin-top:8px">
       ${TIERS.map(t=>{
-        const r=Math.round(tierRates[t]*100);
+        const r=Math.round(Math.max(0,tierRates[t])*100);
         const cls=t==='S'?'ts':t==='A'?'ta':t==='B'?'tb':'tc';
         const nm=t==='S'?'S·核心':t==='A'?'A·常见':t==='B'?'B·中频':'C·低频';
         return `<div class="tbox ${cls}"><div class="tn">${nm}</div><div class="tp">${r}%</div>
@@ -1286,7 +1286,7 @@ function finishTest(){
   </div></div>`;
 
   window._reportStats={cov:covScore,mastered:totalM,gap:gapWords,
-    tiers:{S:Math.round(tierRates['S']*100),A:Math.round(tierRates['A']*100),B:Math.round(tierRates['B']*100),C:Math.round(tierRates['C']*100)}};
+    tiers:{S:Math.round(Math.max(0,tierRates['S'])*100),A:Math.round(Math.max(0,tierRates['A'])*100),B:Math.round(Math.max(0,tierRates['B'])*100),C:Math.round(Math.max(0,tierRates['C'])*100)}};
 
   $('rpt').innerHTML=h;
   window.scrollTo({top:0,behavior:'smooth'});

@@ -612,10 +612,12 @@ function genRound2(){
     const pool=byTier[t].filter(w=>w.cn&&!excl(w));
     for(const w of pick(pool,alloc[t]??0)) qs.push(makeQ(w,2));
   }
-  // Extra confirmation for wrong S-tier words from round 1 (these are current-session, allow re-test)
-  const wrongS=Q.ans.filter(a=>a.tier==='S'&&a.score<0.5&&!used.has(a.word.w));
+  // Extra confirmation for wrong S-tier words from round 1 (re-test current-session words).
+  // wrongS items come FROM Q.ans/`used`, so the legacy `!used.has(...)` filter would have made
+  // both the candidate selection and the dedup check always false — disabling the re-test entirely.
+  const wrongS=Q.ans.filter(a=>a.tier==='S'&&a.score<0.5);
   for(const a of wrongS.slice(0,2)){
-    if(!used.has(a.word.w)) qs.push(makeQ(a.word,2));
+    qs.push(makeQ(a.word,2));
   }
   return shuf(qs);
 }
@@ -679,6 +681,8 @@ function stopQTimer(){
 
 function handleTimeout(){
   // Auto-select "我不确定" (timeout)
+  if(Q.locked) return;
+  Q.locked=true;
   const elapsed=stopQTimer();
   recordAnswer(-1,elapsed,true);
   showFeedback(-1,true);
@@ -747,6 +751,7 @@ function updateTotal(){
 
 function showQ(){
   const q=Q.qs[Q.cur];if(!q)return;
+  Q.locked=false;
   const total=Q.qs.length;
   const rLabels={1:'第1轮 · 广度扫描',2:'第2轮 · 聚焦探测',3:'第3轮 · 薄弱确认'};
   $('qround').textContent=rLabels[q.round]||'';
@@ -777,6 +782,8 @@ function showQ(){
 
 function choose(idx){
   // idx=-1 means "我不确定"
+  if(Q.locked) return;
+  Q.locked=true;
   const elapsed=stopQTimer();
   recordAnswer(idx,elapsed,false);
   showFeedback(idx,false);

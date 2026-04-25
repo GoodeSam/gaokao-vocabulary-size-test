@@ -367,6 +367,88 @@ new_estM = (
 assert old_estM in html, 'estM loop not found'
 html = html.replace(old_estM, new_estM)
 
+# 11b.iv: wrongS filter bug — `used` is built from Q.ans, so the `!used.has(...)`
+# check on words pulled FROM Q.ans is always false. The intended round-1 S-tier
+# re-test never ran. Drop the redundant filter.
+old_wrongS = (
+    '  // Extra confirmation for wrong S-tier words from round 1 (these are current-session, allow re-test)\n'
+    "  const wrongS=Q.ans.filter(a=>a.tier==='S'&&a.score<0.5&&!used.has(a.word.w));\n"
+    '  for(const a of wrongS.slice(0,2)){\n'
+    '    if(!used.has(a.word.w)) qs.push(makeQ(a.word,2));\n'
+    '  }'
+)
+new_wrongS = (
+    '  // Extra confirmation for wrong S-tier words from round 1 (re-test current-session words).\n'
+    "  // wrongS items come FROM Q.ans/`used`, so the legacy `!used.has(...)` filter would have made\n"
+    '  // both the candidate selection and the dedup check always false — disabling the re-test entirely.\n'
+    "  const wrongS=Q.ans.filter(a=>a.tier==='S'&&a.score<0.5);\n"
+    '  for(const a of wrongS.slice(0,2)){\n'
+    '    qs.push(makeQ(a.word,2));\n'
+    '  }'
+)
+assert old_wrongS in html, 'wrongS block not found'
+html = html.replace(old_wrongS, new_wrongS)
+
+# 11b.v: choose() and handleTimeout() re-entry lock — without it, a fast double-click
+# (or a click that races with the timeout firing) records two answers for the same
+# question and advances the test pointer twice.
+old_choose = (
+    'function choose(idx){\n'
+    '  // idx=-1 means "我不确定"\n'
+    '  const elapsed=stopQTimer();\n'
+    '  recordAnswer(idx,elapsed,false);\n'
+    '  showFeedback(idx,false);\n'
+    '}'
+)
+new_choose = (
+    'function choose(idx){\n'
+    '  // idx=-1 means "我不确定"\n'
+    '  if(Q.locked) return;\n'
+    '  Q.locked=true;\n'
+    '  const elapsed=stopQTimer();\n'
+    '  recordAnswer(idx,elapsed,false);\n'
+    '  showFeedback(idx,false);\n'
+    '}'
+)
+assert old_choose in html, 'choose() function not found'
+html = html.replace(old_choose, new_choose)
+
+old_timeout = (
+    'function handleTimeout(){\n'
+    '  // Auto-select "我不确定" (timeout)\n'
+    '  const elapsed=stopQTimer();\n'
+    '  recordAnswer(-1,elapsed,true);\n'
+    '  showFeedback(-1,true);\n'
+    '}'
+)
+new_timeout = (
+    'function handleTimeout(){\n'
+    '  // Auto-select "我不确定" (timeout)\n'
+    '  if(Q.locked) return;\n'
+    '  Q.locked=true;\n'
+    '  const elapsed=stopQTimer();\n'
+    '  recordAnswer(-1,elapsed,true);\n'
+    '  showFeedback(-1,true);\n'
+    '}'
+)
+assert old_timeout in html, 'handleTimeout() function not found'
+html = html.replace(old_timeout, new_timeout)
+
+# Reset the lock when the next question is shown.
+old_showq_head = (
+    'function showQ(){\n'
+    '  const q=Q.qs[Q.cur];if(!q)return;\n'
+    '  const total=Q.qs.length;'
+)
+new_showq_head = (
+    'function showQ(){\n'
+    '  const q=Q.qs[Q.cur];if(!q)return;\n'
+    '  Q.locked=false;\n'
+    '  const total=Q.qs.length;'
+)
+assert old_showq_head in html, 'showQ() head not found'
+html = html.replace(old_showq_head, new_showq_head)
+
 # ---------- Step 12: overflow tip threshold ----------
 # Keep at 4200 — warning is about test pool ceiling (4484 words) becoming unreliable,
 # which conveniently aligns with the 大学四级 threshold.

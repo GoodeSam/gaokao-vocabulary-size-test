@@ -931,6 +931,14 @@ function finishTest(){
   let totalM=SKIP_TOP, _ciVarSum=0;
   for(const t of TIERS){
     const n=tierCounts[t];
+    if(n===0){
+      // No data → no extrapolation. Treat as fully unknown so studyStartRank
+      // (which uses rShrunkByTier) lands here, prompting the student to start
+      // from this tier. Skip the CI margin too (no data, no contribution).
+      estM[t]=0;
+      rShrunkByTier[t]=0;
+      continue;
+    }
     const r=Math.max(0,tierRates[t]);
     const rShrunk=(K_SHRINK*P0_BY_TIER[t]+n*r)/(K_SHRINK+n);
     rShrunkByTier[t]=rShrunk;
@@ -962,9 +970,6 @@ function finishTest(){
   const fastCorrect=Q.ans.filter(a=>a.correct&&a.elapsed<=SLOW_THRESHOLD).length;
   const slowCorrect=Q.ans.filter(a=>a.correct&&a.elapsed>SLOW_THRESHOLD).length;
   const fastRate=total?Math.round(fastCorrect/total*100):0;
-  const confidentRate=total?Math.round((fastCorrect+slowCorrect)/total*100):0;
-  const fastConf=fastCorrect>=15?'高':fastCorrect>=8?'中':'低';
-  const slowConf=slowCorrect>=5?'中':'低';
 
   // Average response time for correct answers
   const correctTimes=Q.ans.filter(a=>a.correct).map(a=>a.elapsed);
@@ -1165,14 +1170,16 @@ function finishTest(){
     const show=Math.min(wrongWords.length,15);
     h+=`<div class="card fade"><div class="card-t">最值得优先学习的 ${show} 个单词</div>
       <div style="font-size:12px;color:var(--gray);margin-bottom:8px">按高考提分效用排序 · 优先掌握这些词能最快提升成绩</div>
-      <table class="wlt"><thead><tr><th>#</th><th>单词</th><th>释义</th><th>层级</th><th>提分效用</th></tr></thead>
+      <table class="wlt"><thead><tr><th>#</th><th>单词</th><th>释义</th><th>层级</th><th>状态</th><th>提分效用</th></tr></thead>
       <tbody id="rwt">`;
     wrongWords.slice(0,show).forEach((ww,i)=>{
       const stars=ww.utility>2?'★★★★★':ww.utility>1.2?'★★★★☆':ww.utility>.6?'★★★☆☆':'★★☆☆☆';
       const bc='badge-'+ww.tier.toLowerCase();
       const cn=ww.word.cn.split('\n')[0];
+      const st=ww.timeout?'超时':ww.unsure?'不确定':ww.score>0?`慢(${ww.elapsed}s)`:'答错';
       h+=`<tr><td>${i+1}</td><td class="wc">${ww.word.w}</td><td class="cc" title="${cn}">${cn}</td>
         <td><span class="badge ${bc}">${ww.tier}</span></td>
+        <td style="font-size:11px">${st}</td>
         <td class="stars">${stars}</td></tr>`;
     });
     h+=`</tbody></table>`;

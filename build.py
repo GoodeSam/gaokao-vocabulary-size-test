@@ -347,7 +347,10 @@ new_alloc = 'for(const w of pick(pool,alloc[t]??0)) qs.push(makeQ(w,2));'
 assert old_alloc in html, 'genRound2 alloc line not found'
 html = html.replace(old_alloc, new_alloc)
 
-# 11b.iii: estM loop — Bayesian shrinkage (K=2, P0=0.3) + C cap when n<2
+# 11b.iii: estM loop — Bayesian shrinkage with tier-specific priors
+#   (K=1, P0_BY_TIER={S:0.7,A:0.5,B:0.3,C:0.1}) + C cap when n<2 + n=0 guard.
+# Also computes 95% CI margins (per-tier binomial, summed in quadrature) and
+# saves rShrunkByTier for the threshold-based studyStartRank in 11b.viii.
 old_estM = (
     '  // Estimated mastered words per tier (skipped top words count as mastered)\n'
     '  const estM={};let totalM=SKIP_TOP;\n'
@@ -368,6 +371,14 @@ new_estM = (
     '  let totalM=SKIP_TOP, _ciVarSum=0;\n'
     "  for(const t of['S','A','B','C']){\n"
     '    const n=tierCounts[t];\n'
+    '    if(n===0){\n'
+    '      // No data → no extrapolation. Treat as fully unknown so studyStartRank\n'
+    '      // (which uses rShrunkByTier) lands here, prompting the student to start\n'
+    '      // from this tier. Skip the CI margin too (no data, no contribution).\n'
+    '      estM[t]=0;\n'
+    '      rShrunkByTier[t]=0;\n'
+    '      continue;\n'
+    '    }\n'
     '    const r=Math.max(0,tierRates[t]);\n'
     '    const rShrunk=(K_SHRINK*P0_BY_TIER[t]+n*r)/(K_SHRINK+n);\n'
     '    rShrunkByTier[t]=rShrunk;\n'
@@ -601,8 +612,9 @@ new_study = (
 assert old_study in html, 'studyStartRank block not found (template may have changed)'
 html = html.replace(old_study, new_study)
 
-# 11b.ix: coverage uses raw tierRates which can be negative (wrong=-0.3). estM clamps
-# to non-negative; coverage should too, otherwise scoring behavior is inconsistent.
+# 11b.ix: coverage uses raw tierRates which can be negative (wrong score is -0.4).
+# estM clamps to non-negative; coverage must too, otherwise scoring is inconsistent
+# and the cover card's percent could read negative for poor performers.
 old_cov = "  for(const t of['S','A','B','C']) covFreq+=tierRates[t]*tierFreq[t];"
 new_cov = "  for(const t of['S','A','B','C']) covFreq+=Math.max(0,tierRates[t])*tierFreq[t];"
 assert old_cov in html, 'coverage loop not found'
@@ -664,7 +676,7 @@ html = html.replace(
 print(f'Replaced {_n_of + _n_map + 1} legacy tier-array literals with TIERS constant')
 
 # 11b.xiii: tier-rate display/export was not clamping to ≥0, so wrong answers
-# (score=-0.3) could surface as negative percent in tier cards and _reportStats —
+# (score=-0.4) could surface as negative percent in tier cards and _reportStats —
 # inconsistent with the coverage clamp added in 11b.ix and the estM clamp.
 old_tier_pct = '        const r=Math.round(tierRates[t]*100);'
 new_tier_pct = '        const r=Math.round(Math.max(0,tierRates[t])*100);'
@@ -742,6 +754,50 @@ new_study_card_body = (
 )
 assert old_study_card_body in html, 'study card body span not found'
 html = html.replace(old_study_card_body, new_study_card_body)
+
+# 11b.xviii: high-value gap word table — header had 5 columns but `showAll()`
+# rendered 6 (added 作答状态 cell), so expanding misaligned the table. Add the
+# 状态 column to the header AND to the initial Top-15 rows so both views share
+# the same shape.
+old_table_head = '<table class="wlt"><thead><tr><th>#</th><th>单词</th><th>释义</th><th>层级</th><th>提分效用</th></tr></thead>'
+new_table_head = '<table class="wlt"><thead><tr><th>#</th><th>单词</th><th>释义</th><th>层级</th><th>状态</th><th>提分效用</th></tr></thead>'
+assert old_table_head in html, 'wrongWords table head not found'
+html = html.replace(old_table_head, new_table_head)
+
+old_top15_row = (
+    '    wrongWords.slice(0,show).forEach((ww,i)=>{\n'
+    "      const stars=ww.utility>2?'★★★★★':ww.utility>1.2?'★★★★☆':ww.utility>.6?'★★★☆☆':'★★☆☆☆';\n"
+    "      const bc='badge-'+ww.tier.toLowerCase();\n"
+    "      const cn=ww.word.cn.split('\\n')[0];\n"
+    '      h+=`<tr><td>${i+1}</td><td class="wc">${ww.word.w}</td><td class="cc" title="${cn}">${cn}</td>\n'
+    '        <td><span class="badge ${bc}">${ww.tier}</span></td>\n'
+    '        <td class="stars">${stars}</td></tr>`;\n'
+    '    });'
+)
+new_top15_row = (
+    '    wrongWords.slice(0,show).forEach((ww,i)=>{\n'
+    "      const stars=ww.utility>2?'★★★★★':ww.utility>1.2?'★★★★☆':ww.utility>.6?'★★★☆☆':'★★☆☆☆';\n"
+    "      const bc='badge-'+ww.tier.toLowerCase();\n"
+    "      const cn=ww.word.cn.split('\\n')[0];\n"
+    "      const st=ww.timeout?'超时':ww.unsure?'不确定':ww.score>0?`慢(${ww.elapsed}s)`:'答错';\n"
+    '      h+=`<tr><td>${i+1}</td><td class="wc">${ww.word.w}</td><td class="cc" title="${cn}">${cn}</td>\n'
+    '        <td><span class="badge ${bc}">${ww.tier}</span></td>\n'
+    '        <td style="font-size:11px">${st}</td>\n'
+    '        <td class="stars">${stars}</td></tr>`;\n'
+    '    });'
+)
+assert old_top15_row in html, 'Top-15 wrongWords row template not found'
+html = html.replace(old_top15_row, new_top15_row)
+
+# 11b.xix: dead vars — confidentRate/fastConf/slowConf were computed but never
+# read by any downstream UI/export. Drop them.
+old_dead_vars = (
+    '  const confidentRate=total?Math.round((fastCorrect+slowCorrect)/total*100):0;\n'
+    "  const fastConf=fastCorrect>=15?'高':fastCorrect>=8?'中':'低';\n"
+    "  const slowConf=slowCorrect>=5?'中':'低';\n"
+)
+assert old_dead_vars in html, 'confidence-rate dead-var block not found'
+html = html.replace(old_dead_vars, '')
 
 # ---------- Step 12: overflow tip threshold ----------
 # Keep at 4200 — warning is about test pool ceiling (4484 words) becoming unreliable,

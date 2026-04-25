@@ -603,7 +603,10 @@ function genRound2(){
     rates[t]=a.length?a.reduce((s,v)=>s+v,0)/a.length:0.5;
   }
   // Rank tiers by closeness to fuzzy zone center (0.55)
-  const ranked=[...TIERS].sort((a,b)=>Math.abs(rates[a]-.55)-Math.abs(rates[b]-.55));
+  const ranked=[...TIERS].sort((a,b)=>{
+    const da=Math.abs(rates[a]-.55), db=Math.abs(rates[b]-.55);
+    return Math.abs(da-db)<0.05 ? byTier[b].length-byTier[a].length : da-db;
+  });
   // 14 questions weighted by rate-to-0.55 closeness (focus probe: 6,4,3,1).
   const alloc={[ranked[0]]:6,[ranked[1]]:4,[ranked[2]]:3,[ranked[3]]:1};
   // Reserve up to 2 slots for re-testing wrong S-tier words from round 1 by
@@ -693,7 +696,7 @@ function handleTimeout(){
 // Returns a score: 1=fast correct, 0=unsure/timeout, negative=wrong
 function calcScore(isCorrect,isUnsure,elapsed,isTimeout){
   if(isTimeout||isUnsure) return 0;   // "我不确定" or timeout: neutral
-  if(!isCorrect) return -0.3;          // wrong answer: negative signal (worse than unsure)
+  if(!isCorrect) return -0.4;          // wrong answer: makes blind 4-choice guess EV slightly negative (-0.05)
   // Correct answer — penalize if slow
   if(elapsed>SLOW_THRESHOLD){
     // Linear decay from SLOW_THRESHOLD to TIME_LIMIT
@@ -919,19 +922,28 @@ function finishTest(){
 
   // Estimated mastered words per tier (skipped top words count as mastered).
   // Bayesian shrinkage r' = (K*P0 + n*r)/(K+n) pulls small-sample tier rates
-  // toward a mild prior so a lucky 1-of-1 on a big tier (especially C, ~1800 words)
-  // cannot extrapolate into a massive inflated estimate. The extra cap on tier C
-  // when n<2 protects against the worst single-sample pathological case.
-  const K_SHRINK=1,P0=0.3,C_CAP_LOW_N=1100;
-  const estM={};let totalM=SKIP_TOP;
+  // toward a tier-specific prior (S~high freq, very likely known; C~rare, mostly unknown)
+  // so a lucky 1-of-1 on a big tier can't extrapolate into a massive inflated estimate.
+  // Also computes a 95% CI on the total via independent per-tier binomial margins,
+  // and saves rShrunkByTier for the threshold-based studyStartRank rewrite.
+  const K_SHRINK=1,P0_BY_TIER={S:0.7,A:0.5,B:0.3,C:0.1},C_CAP_LOW_N=1100;
+  const estM={},rShrunkByTier={};
+  let totalM=SKIP_TOP, _ciVarSum=0;
   for(const t of TIERS){
     const n=tierCounts[t];
     const r=Math.max(0,tierRates[t]);
-    const rShrunk=(K_SHRINK*P0+n*r)/(K_SHRINK+n);
+    const rShrunk=(K_SHRINK*P0_BY_TIER[t]+n*r)/(K_SHRINK+n);
+    rShrunkByTier[t]=rShrunk;
     estM[t]=Math.max(0,Math.round(byTier[t].length*rShrunk));
     if(t==='C'&&n<2) estM[t]=Math.min(estM[t],C_CAP_LOW_N);
     totalM+=estM[t];
+    const _seRate=Math.sqrt(rShrunk*(1-rShrunk)/Math.max(1,n+K_SHRINK));
+    const _tierMargin=1.96*_seRate*byTier[t].length;
+    _ciVarSum+=_tierMargin*_tierMargin;
   }
+  const _totalMargin=Math.round(Math.sqrt(_ciVarSum));
+  const totalM_low=Math.max(SKIP_TOP, totalM-_totalMargin);
+  const totalM_high=Math.min(SKIP_TOP+WORDS.length, totalM+_totalMargin);
 
   // Coverage score — skipped top words are assumed mastered (100% coverage)
   const tierFreq={S:0,A:0,B:0,C:0};
@@ -976,19 +988,22 @@ function finishTest(){
 
   const mc=v=>v>=75?'var(--ok)':v>=50?'var(--warn)':'var(--err)';
 
-  // ── Estimate study start position in the frequency-ranked word list ──
-  // Logic: assume student has mastered words from rank 1 down to a boundary.
-  // Use tier mastery rates to find the approximate cutoff.
-  // Words are sorted by frequency (rank 1 = highest freq).
-  // Walk through tiers S→A→B→C; within each tier the mastery rate tells us
-  // roughly what fraction of that tier the student knows.
-  // The "start studying from here" position = sum of estimated mastered words per tier,
-  // walking in frequency order.
-  let studyStartRank=SKIP_TOP;
+  // ── Find study start rank: first tier whose shrunken mastery rate < threshold ──
+  // Old logic (estM-sum) implicitly assumed mastery is monotone in frequency rank,
+  // so weak-on-S strong-on-C students got told to skip past their high-freq gap.
+  // New logic: walk tiers in frequency order; the first tier where the shrunken rate
+  // drops below STUDY_THRESHOLD is where to focus. That tier's first-rank position
+  // is the recommended study start.
+  const STUDY_THRESHOLD=0.7;
+  let studyStartRank=WORDS.length;
+  let _cumRank=SKIP_TOP;
   for(const t of TIERS){
-    studyStartRank+=estM[t];
+    if(rShrunkByTier[t]<STUDY_THRESHOLD){
+      studyStartRank=_cumRank+1;
+      break;
+    }
+    _cumRank+=byTier[t].length;
   }
-  // Clamp to valid range
   studyStartRank=Math.min(studyStartRank, WORDS.length);
   // Map vocabulary size to grade level
   function vocabToGrade(n){
@@ -1038,6 +1053,7 @@ function finishTest(){
   h+=`<div class="card fade" style="background:linear-gradient(135deg,#eef0ff,#f5f0ff);border:2px solid var(--primary);text-align:center;padding:28px 22px">
     <div style="font-size:20px;font-weight:800;color:var(--txt)">${_stuName} <span style="font-size:15px;font-weight:700;color:var(--primary);background:var(--primary-lt);padding:3px 12px;border-radius:14px;margin-left:6px">${_stuGrade}</span></div>
     <div style="font-size:42px;font-weight:900;color:var(--primary);margin:8px 0">~${totalM}<span style="font-size:16px;font-weight:600">词</span></div>
+    <div style="font-size:11px;color:var(--gray);margin-top:-4px;margin-bottom:4px">95% 置信区间 ${totalM_low} ~ ${totalM_high} 词</div>
     <div style="font-size:14px;color:#7c3aed;font-weight:700;margin-bottom:6px">相当于${equivGrade}的单词水平</div>
     ${pctile!==null?`<div style="display:inline-block;padding:6px 18px;border-radius:20px;background:${pctile>=70?'#ecfdf5':'#fffbeb'};color:${pctile>=70?'#10b981':'#f59e0b'};font-size:15px;font-weight:800">超过同年级 ${pctile}% 的同学</div>`:''}
     ${compareText?`<div style="margin-top:10px;font-size:14px;font-weight:700;color:${compareColor}">${compareIcon} ${compareText}</div>`:''}

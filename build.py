@@ -358,20 +358,29 @@ old_estM = (
 )
 new_estM = (
     '  // Estimated mastered words per tier (skipped top words count as mastered).\n'
-    '  // Bayesian shrinkage r\' = (K*P0 + n*r)/(K+n) pulls small-sample tier rates\n'
-    '  // toward a mild prior so a lucky 1-of-1 on a big tier (especially C, ~1800 words)\n'
-    '  // cannot extrapolate into a massive inflated estimate. The extra cap on tier C\n'
-    '  // when n<2 protects against the worst single-sample pathological case.\n'
-    '  const K_SHRINK=1,P0=0.3,C_CAP_LOW_N=1100;\n'
-    '  const estM={};let totalM=SKIP_TOP;\n'
+    "  // Bayesian shrinkage r' = (K*P0 + n*r)/(K+n) pulls small-sample tier rates\n"
+    '  // toward a tier-specific prior (S~high freq, very likely known; C~rare, mostly unknown)\n'
+    "  // so a lucky 1-of-1 on a big tier can't extrapolate into a massive inflated estimate.\n"
+    '  // Also computes a 95% CI on the total via independent per-tier binomial margins,\n'
+    '  // and saves rShrunkByTier for the threshold-based studyStartRank rewrite.\n'
+    '  const K_SHRINK=1,P0_BY_TIER={S:0.7,A:0.5,B:0.3,C:0.1},C_CAP_LOW_N=1100;\n'
+    '  const estM={},rShrunkByTier={};\n'
+    '  let totalM=SKIP_TOP, _ciVarSum=0;\n'
     "  for(const t of['S','A','B','C']){\n"
     '    const n=tierCounts[t];\n'
     '    const r=Math.max(0,tierRates[t]);\n'
-    '    const rShrunk=(K_SHRINK*P0+n*r)/(K_SHRINK+n);\n'
+    '    const rShrunk=(K_SHRINK*P0_BY_TIER[t]+n*r)/(K_SHRINK+n);\n'
+    '    rShrunkByTier[t]=rShrunk;\n'
     '    estM[t]=Math.max(0,Math.round(byTier[t].length*rShrunk));\n'
     "    if(t==='C'&&n<2) estM[t]=Math.min(estM[t],C_CAP_LOW_N);\n"
     '    totalM+=estM[t];\n'
-    '  }'
+    '    const _seRate=Math.sqrt(rShrunk*(1-rShrunk)/Math.max(1,n+K_SHRINK));\n'
+    '    const _tierMargin=1.96*_seRate*byTier[t].length;\n'
+    '    _ciVarSum+=_tierMargin*_tierMargin;\n'
+    '  }\n'
+    '  const _totalMargin=Math.round(Math.sqrt(_ciVarSum));\n'
+    '  const totalM_low=Math.max(SKIP_TOP, totalM-_totalMargin);\n'
+    '  const totalM_high=Math.min(SKIP_TOP+WORDS.length, totalM+_totalMargin);'
 )
 assert old_estM in html, 'estM loop not found'
 html = html.replace(old_estM, new_estM)
@@ -537,10 +546,50 @@ new_r2_budget = (
 assert old_r2_budget in html, 'genRound2 post-fix block not found (R2 budget reservation)'
 html = html.replace(old_r2_budget, new_r2_budget)
 
-# 11b.viii: studyStartRank misses SKIP_TOP — totalM includes SKIP_TOP, so the
-# study-start rank advice was offset 25 words too early.
-assert '  let studyStartRank=0;' in html, 'studyStartRank initializer not found'
-html = html.replace('  let studyStartRank=0;', '  let studyStartRank=SKIP_TOP;')
+# 11b.viii: studyStartRank rewrite — old logic summed estM by tier and used that
+# as the starting rank, which silently assumed mastered words form a contiguous
+# prefix of the freq-ranked list. A strong-on-A weak-on-S student would have
+# been told to skip past their S-tier gap. New logic: walk tiers in frequency
+# order, find the first tier whose shrunken mastery rate falls below STUDY_THRESHOLD;
+# that tier's start rank is where bulk study should begin. Above it: review;
+# below: learn in bulk.
+old_study = (
+    '  // ── Estimate study start position in the frequency-ranked word list ──\n'
+    '  // Logic: assume student has mastered words from rank 1 down to a boundary.\n'
+    '  // Use tier mastery rates to find the approximate cutoff.\n'
+    '  // Words are sorted by frequency (rank 1 = highest freq).\n'
+    '  // Walk through tiers S→A→B→C; within each tier the mastery rate tells us\n'
+    '  // roughly what fraction of that tier the student knows.\n'
+    '  // The "start studying from here" position = sum of estimated mastered words per tier,\n'
+    '  // walking in frequency order.\n'
+    '  let studyStartRank=0;\n'
+    "  for(const t of['S','A','B','C']){\n"
+    '    studyStartRank+=estM[t];\n'
+    '  }\n'
+    '  // Clamp to valid range\n'
+    '  studyStartRank=Math.min(studyStartRank, WORDS.length);'
+)
+new_study = (
+    '  // ── Find study start rank: first tier whose shrunken mastery rate < threshold ──\n'
+    '  // Old logic (estM-sum) implicitly assumed mastery is monotone in frequency rank,\n'
+    '  // so weak-on-S strong-on-C students got told to skip past their high-freq gap.\n'
+    '  // New logic: walk tiers in frequency order; the first tier where the shrunken rate\n'
+    "  // drops below STUDY_THRESHOLD is where to focus. That tier's first-rank position\n"
+    '  // is the recommended study start.\n'
+    '  const STUDY_THRESHOLD=0.7;\n'
+    '  let studyStartRank=WORDS.length;\n'
+    '  let _cumRank=SKIP_TOP;\n'
+    "  for(const t of['S','A','B','C']){\n"
+    '    if(rShrunkByTier[t]<STUDY_THRESHOLD){\n'
+    '      studyStartRank=_cumRank+1;\n'
+    '      break;\n'
+    '    }\n'
+    '    _cumRank+=byTier[t].length;\n'
+    '  }\n'
+    '  studyStartRank=Math.min(studyStartRank, WORDS.length);'
+)
+assert old_study in html, 'studyStartRank block not found (template may have changed)'
+html = html.replace(old_study, new_study)
 
 # 11b.ix: coverage uses raw tierRates which can be negative (wrong=-0.3). estM clamps
 # to non-negative; coverage should too, otherwise scoring behavior is inconsistent.
@@ -626,6 +675,44 @@ new_export = (
 )
 assert old_export in html, '_reportStats tiers export not found'
 html = html.replace(old_export, new_export)
+
+# 11b.xiv: 4-choice random-guess EV used to be 0.25*1 + 0.75*(-0.3) = +0.025,
+# i.e. wild guessing strictly beat picking "我不确定" — and inflated estimates.
+# Drop wrong-answer score to -0.4 so guess EV = 0.25 - 0.3 = -0.05 (slight
+# disincentive). Informed 50/50 guesses are still positive (0.5 - 0.2 = +0.3).
+old_wrong = '  if(!isCorrect) return -0.3;          // wrong answer: negative signal (worse than unsure)'
+new_wrong = '  if(!isCorrect) return -0.4;          // wrong answer: makes blind 4-choice guess EV slightly negative (-0.05)'
+assert old_wrong in html, 'wrong-answer scoring line not found'
+html = html.replace(old_wrong, new_wrong)
+
+# 11b.xv: R2 tie-break — when several tiers have similar |rate-0.55|, the stable
+# sort kept order S,A,B,C, so C (the largest tier) consistently got the smallest
+# alloc=1. Tie-break (within 0.05) by tier size DESC so the biggest pool gets the
+# most samples when uncertainty is comparable across tiers.
+old_rank_sort = (
+    'const ranked=[...TIERS].sort((a,b)=>Math.abs(rates[a]-.55)-Math.abs(rates[b]-.55));'
+)
+new_rank_sort = (
+    'const ranked=[...TIERS].sort((a,b)=>{\n'
+    '    const da=Math.abs(rates[a]-.55), db=Math.abs(rates[b]-.55);\n'
+    '    return Math.abs(da-db)<0.05 ? byTier[b].length-byTier[a].length : da-db;\n'
+    '  });'
+)
+assert old_rank_sort in html, 'R2 ranked.sort line not found'
+html = html.replace(old_rank_sort, new_rank_sort)
+
+# 11b.xvi: surface the 95% CI on the cover card so users see the precision floor
+# (35 questions on a 4484-word pool gives roughly ±400-700 word margin). Without
+# the range, the single ~totalM number reads as more precise than it is.
+old_cover = (
+    '<div style="font-size:42px;font-weight:900;color:var(--primary);margin:8px 0">~${totalM}<span style="font-size:16px;font-weight:600">词</span></div>'
+)
+new_cover = (
+    '<div style="font-size:42px;font-weight:900;color:var(--primary);margin:8px 0">~${totalM}<span style="font-size:16px;font-weight:600">词</span></div>\n'
+    '    <div style="font-size:11px;color:var(--gray);margin-top:-4px;margin-bottom:4px">95% 置信区间 ${totalM_low} ~ ${totalM_high} 词</div>'
+)
+assert old_cover in html, 'cover card totalM display not found'
+html = html.replace(old_cover, new_cover)
 
 # ---------- Step 12: overflow tip threshold ----------
 # Keep at 4200 — warning is about test pool ceiling (4484 words) becoming unreliable,

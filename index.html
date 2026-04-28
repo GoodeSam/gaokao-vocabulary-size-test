@@ -92,6 +92,8 @@ body{font-family:-apple-system,BlinkMacSystemFont,"Segoe UI","PingFang SC","Micr
 .opt .otxt{flex:1}
 .opt-unsure{border-style:dashed;border-color:var(--border)}
 .opt-unsure:hover{border-color:var(--gray);background:#f8fafc}
+.opt-none{border-style:dashed;border-color:var(--border)}
+.opt-none:hover{border-color:var(--primary);background:var(--primary-lt)}
 
 /* ─── report ─── */
 .sc-hdr{display:flex;justify-content:space-between;align-items:baseline;margin-bottom:6px}
@@ -229,6 +231,7 @@ table.wlt tr:hover{background:var(--bg)}
       <div style="font-size:13px;color:var(--gray)">
         <p style="margin-bottom:4px">&#10003; 每题限时 <b>8秒</b>，超时视为不确定</p>
         <p style="margin-bottom:4px">&#10003; 不确定时请选 <b>"我不确定"</b>，诚实作答比猜对更有诊断价值</p>
+        <p style="margin-bottom:4px">&#10003; B-E 中有时<b>不放正确答案</b>，若都不对请果断选 <b>F · 以上都不是</b></p>
         <p style="margin-bottom:4px;color:#dc2626">&#10007; <b>乱猜或选错会扣分</b>，比选"我不确定"结果更差 &mdash; 不会就老实选A</p>
         <p>&#10003; 反应时间纳入评估 &mdash; 犹豫过久的正确答案会被适当降权</p>
       </div>
@@ -548,9 +551,10 @@ function distractors(tgt,n){
 }
 
 // ════════════ QUESTION GENERATION ════════════
-let _qSeq=0; // rotating counter to distribute correct answer evenly across B/C/D/E
+let _qSeq=0; // rotating counter: 0-3 → correct in B/C/D/E, 4 → correct in F
 function makeQ(word,round){
-  const ds=distractors(word,3);
+  // Need 4 distractors so F-correct questions still have BCDE filled with wrong options.
+  const ds=distractors(word,4);
   const norm=s=>s.replace(/\s+/g,'').toLowerCase();
   const correctText=word.cn.split('\n')[0];
   const correctNorm=norm(correctText);
@@ -563,24 +567,34 @@ function makeQ(word,round){
     if(!usedNorm.has(n)){usedNorm.add(n);uniqueDs.push(d)}
   }
   // If dedup removed some, fill replacements from WORDS pool
-  if(uniqueDs.length<3){
+  if(uniqueDs.length<4){
     const pool=shuf(WORDS.filter(w=>w.w!==word.w&&w.cn&&!usedNorm.has(norm(w.cn.split('\n')[0]))));
     for(const w of pool){
-      if(uniqueDs.length>=3)break;
+      if(uniqueDs.length>=4)break;
       const n=norm(w.cn.split('\n')[0]);
       if(!usedNorm.has(n)){usedNorm.add(n);uniqueDs.push(w)}
     }
   }
-  const correctOpt={text:correctText,correct:true};
   const wrongOpts=uniqueDs.map(d=>({text:d.cn.split('\n')[0],correct:false}));
-  // Place correct answer at position determined by rotating counter (0-3 → B/C/D/E)
-  const pos=_qSeq%4;
+  // Rotate correct-answer position across 5 slots (B/C/D/E/F) so a random guess
+  // among BCDEF only has 1/5 chance — and the F=以上都不是 option makes it pay
+  // off to honestly recognize when no listed meaning matches.
+  const pos=_qSeq%5;
   _qSeq++;
   const choices=[];
-  let wi=0;
-  for(let i=0;i<4;i++){
-    if(i===pos) choices.push(correctOpt);
-    else choices.push(wrongOpts[wi++]);
+  if(pos===4){
+    // F is correct: BCDE are all distractors, F = 以上都不是 (correct)
+    for(let i=0;i<4;i++) choices.push(wrongOpts[i]);
+    choices.push({text:'以上都不是',correct:true,none:true});
+  }else{
+    // Correct answer goes in BCDE at position `pos`; remaining 3 BCDE slots are
+    // distractors; F = 以上都不是 (wrong)
+    let wi=0;
+    for(let i=0;i<4;i++){
+      if(i===pos) choices.push({text:correctText,correct:true});
+      else choices.push(wrongOpts[wi++]);
+    }
+    choices.push({text:'以上都不是',correct:false,none:true});
   }
   return {word,tier:word.tier,round,choices};
 }
@@ -769,13 +783,15 @@ function showQ(){
   $('qw').textContent=q.word.w;
   $('qph').textContent=q.word.p||'';
 
-  // Build options: A=我不确定, then B-E=choices
-  const keys=['A','B','C','D','E'];
+  // Build options: A=我不确定, then B-F=choices (last is "以上都不是")
+  const keys=['A','B','C','D','E','F'];
   let h=`<div class="opt opt-unsure" data-i="-1" onclick="choose(-1)">
     <div class="k">${keys[0]}</div><div class="otxt" style="color:var(--gray)">我不确定</div></div>`;
   q.choices.forEach((c,i)=>{
-    h+=`<div class="opt" data-i="${i}" onclick="choose(${i})">
-      <div class="k">${keys[i+1]}</div><div class="otxt">${c.text}</div></div>`;
+    const noneCls=c.none?' opt-none':'';
+    const noneStyle=c.none?' style="color:var(--gray)"':'';
+    h+=`<div class="opt${noneCls}" data-i="${i}" onclick="choose(${i})">
+      <div class="k">${keys[i+1]}</div><div class="otxt"${noneStyle}>${c.text}</div></div>`;
   });
   $('qopts').innerHTML=h;
   $('qopts').classList.add('fade');
@@ -888,7 +904,7 @@ function continueTest(nextRound){
 // Keyboard support
 document.addEventListener('keydown',e=>{
   if($('S1').classList.contains('hidden'))return;
-  const map={a:-1,b:0,c:1,d:2,e:3,'1':-1,'2':0,'3':1,'4':2,'5':3};
+  const map={a:-1,b:0,c:1,d:2,e:3,f:4,'1':-1,'2':0,'3':1,'4':2,'5':3,'6':4};
   const idx=map[e.key.toLowerCase()];
   if(idx!==undefined){
     const opts=document.querySelectorAll('#qopts .opt:not(.dim)');

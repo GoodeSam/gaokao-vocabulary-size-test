@@ -1072,8 +1072,22 @@ function _checkAdminEntry(){
     adminViewReport();
   }
 }
-if(document.readyState==='loading')document.addEventListener('DOMContentLoaded',_checkAdminEntry);
-else _checkAdminEntry();
+// Hidden admin entry: tap the page title 5× within 3s (invisible to students).
+function _wireSecretAdmin(){
+  const title=document.querySelector('.hdr h1');
+  if(!title)return;
+  let taps=0,timer=null;
+  title.style.cursor='default';
+  title.addEventListener('click',()=>{
+    taps++;
+    clearTimeout(timer);
+    timer=setTimeout(()=>{taps=0},3000);
+    if(taps>=5){taps=0;clearTimeout(timer);showAdmin();}
+  });
+}
+function _initAdmin(){_checkAdminEntry();_wireSecretAdmin();}
+if(document.readyState==='loading')document.addEventListener('DOMContentLoaded',_initAdmin);
+else _initAdmin();
 
 // ════════════ REPORT ════════════
 function finishTest(){

@@ -329,6 +329,44 @@ table.wlt tr:hover{background:var(--bg)}
   <!-- ═══ Break between rounds ═══ -->
   <div id="Sbreak" class="hidden"><div id="break-content"></div></div>
 
+  <!-- ═══ Student: test complete — result code only, no report ═══ -->
+  <div id="Sdone" class="hidden">
+    <div class="card fade" style="text-align:center;border:2px solid var(--primary);background:linear-gradient(135deg,#eef0ff,#f5f0ff)">
+      <div style="font-size:40px;margin-bottom:6px">✅</div>
+      <div style="font-size:20px;font-weight:800;color:var(--txt)">测试完成！</div>
+      <div style="font-size:13px;color:var(--gray);line-height:1.8;margin-top:8px">
+        为了给你做<b style="color:var(--primary)">一对一的精准解读</b>，本次诊断报告暂不直接显示。<br>
+        请把下方的<b>成绩码</b>发给土妹老师，即可获取<b>完整诊断报告</b>和<b>专属提升方案</b>。
+      </div>
+    </div>
+    <div class="card fade">
+      <div class="card-t">你的成绩码</div>
+      <div id="done-code" style="font-family:ui-monospace,Menlo,Consolas,monospace;font-size:13px;line-height:1.6;word-break:break-all;background:var(--bg);border:1.5px dashed var(--primary);border-radius:10px;padding:14px;color:var(--txt);user-select:all"></div>
+      <button class="btn btn-p" style="width:100%;margin-top:12px" onclick="copyCode(this)">复制成绩码</button>
+      <div style="font-size:12px;color:var(--gray);text-align:center;margin-top:8px">复制后发送给土妹老师即可</div>
+    </div>
+    <div class="card fade" style="background:linear-gradient(135deg,#ecfdf5,#eff6ff);border:2px solid var(--ok);text-align:center">
+      <div class="card-t" style="color:var(--ok);justify-content:center">下一步：把成绩码发给土妹</div>
+      <div style="font-size:13px;color:var(--txt);line-height:1.8;margin-bottom:12px">老师会为你解读报告，并定制你的词汇提升计划。</div>
+      <button class="btn btn-p" style="width:100%" onclick="contactTutor()">添加土妹微信 → 领取诊断报告</button>
+    </div>
+    <div class="txc mt14">
+      <button class="btn btn-o" style="width:100%" onclick="$('Sdone').classList.add('hidden');$('S0').classList.remove('hidden');window.scrollTo(0,0)">返回首页</button>
+    </div>
+  </div>
+
+  <!-- ═══ Admin: decode a result code into the full report ═══ -->
+  <div id="Sadmin" class="hidden">
+    <div class="card fade" style="border:2px solid var(--primary)">
+      <div class="card-t">🔐 管理者 · 成绩码解析</div>
+      <div style="font-size:13px;color:var(--gray);line-height:1.7;margin-bottom:10px">粘贴学生提供的成绩码，生成完整诊断报告。</div>
+      <textarea id="adminCode" placeholder="在此粘贴成绩码（以 TM 开头）" style="width:100%;box-sizing:border-box;min-height:96px;font-family:ui-monospace,Menlo,Consolas,monospace;font-size:13px;line-height:1.5;padding:12px;border:1.5px solid var(--border);border-radius:10px;resize:vertical"></textarea>
+      <div id="adminErr" style="display:none;color:var(--err);font-size:13px;margin:8px 0"></div>
+      <button class="btn btn-p" style="width:100%;margin-top:10px" onclick="adminViewReport()">解析报告</button>
+      <button class="btn btn-o" style="width:100%;margin-top:8px" onclick="$('Sadmin').classList.add('hidden');$('S0').classList.remove('hidden');location.hash='';window.scrollTo(0,0)">返回首页</button>
+    </div>
+  </div>
+
   <!-- ═══ Report ═══ -->
   <div id="S2" class="hidden"><div id="rpt"></div>
     <div class="txc mt14">
@@ -912,14 +950,150 @@ document.addEventListener('keydown',e=>{
   }
 });
 
+// ════════════ RESULT CODE (encode / decode) ════════════
+// The report is gated behind a code so the student must come back to the tutor
+// to learn their result. The code is a scrambled, compact snapshot of the raw
+// answers — enough to fully regenerate the report on the same word list.
+const _CODE_PREFIX='TM';
+// XOR scramble key. NOT real cryptography — it only stops a curious student from
+// reading their own result by base64-decoding the code. That is sufficient here.
+const _CODE_KEY=[0x5a,0x37,0xc1,0x9e,0x42,0x6b,0xd8,0x11,0x73,0xa4,0x2f,0x88,0xe5,0x06];
+
+function buildPayload(){
+  return {
+    v:1,
+    wl:WORDS.length,                          // sanity-check against word-list drift
+    n:_stuName,
+    g:_stuGrade,
+    e:Math.floor((Date.now()-Q.t0)/1000),     // total elapsed seconds
+    // [wordIndex, scorePercent(-40..100), flagBits(correct1|unsure2|timeout4), elapsedDeciseconds]
+    a:Q.ans.map(x=>[x.word.idx,Math.round(x.score*100),
+      (x.correct?1:0)|(x.unsure?2:0)|(x.timeout?4:0),Math.round(x.elapsed*10)])
+  };
+}
+
+function _b64urlEncode(bytes){
+  let s='';for(let i=0;i<bytes.length;i++)s+=String.fromCharCode(bytes[i]);
+  return btoa(s).replace(/\+/g,'-').replace(/\//g,'_').replace(/=+$/,'');
+}
+function _b64urlDecode(str){
+  str=str.replace(/-/g,'+').replace(/_/g,'/');
+  while(str.length%4)str+='=';
+  const bin=atob(str),out=new Uint8Array(bin.length);
+  for(let i=0;i<bin.length;i++)out[i]=bin.charCodeAt(i);
+  return out;
+}
+function encodeResult(payload){
+  const bytes=new TextEncoder().encode(JSON.stringify(payload));
+  for(let i=0;i<bytes.length;i++)bytes[i]^=_CODE_KEY[i%_CODE_KEY.length];
+  return _CODE_PREFIX+_b64urlEncode(bytes);
+}
+function decodeResult(code){
+  code=(code||'').trim().replace(/\s+/g,'');
+  if(code.slice(0,_CODE_PREFIX.length)===_CODE_PREFIX) code=code.slice(_CODE_PREFIX.length);
+  const bytes=_b64urlDecode(code);
+  for(let i=0;i<bytes.length;i++)bytes[i]^=_CODE_KEY[i%_CODE_KEY.length];
+  return JSON.parse(new TextDecoder().decode(bytes));
+}
+
+// Rebuild Q / _stu* state from a decoded payload so renderReport() can run.
+function restoreFromPayload(p){
+  _stuName=p.n||'学生';
+  _stuGrade=p.g||'其他';
+  Q.ans=[];Q.tierM={S:[],A:[],B:[],C:[]};
+  (p.a||[]).forEach(r=>{
+    const word=WORDS[r[0]];if(!word)return;
+    const score=r[1]/100,fb=r[2]|0,elapsed=(r[3]||0)/10;
+    Q.ans.push({word:word,tier:word.tier,round:0,
+      correct:!!(fb&1),unsure:!!(fb&2),timeout:!!(fb&4),
+      elapsed:elapsed,score:score});
+    Q.tierM[word.tier].push(score);
+  });
+  Q.t0=Date.now()-(p.e||0)*1000;
+}
+
+// ════════════ STUDENT: completion screen with result code ════════════
+function showDone(code){
+  $('done-code').textContent=code;
+  $('S0').classList.add('hidden');
+  $('S1').classList.add('hidden');
+  $('Sdone').classList.remove('hidden');
+  window.scrollTo({top:0,behavior:'smooth'});
+}
+function copyCode(btn){
+  const code=$('done-code').textContent;
+  const done=()=>{const t=btn.textContent;btn.textContent='✓ 已复制';setTimeout(()=>btn.textContent=t,1500)};
+  if(navigator.clipboard&&navigator.clipboard.writeText){
+    navigator.clipboard.writeText(code).then(done).catch(()=>fallbackCopy(code,done));
+  }else fallbackCopy(code,done);
+}
+function fallbackCopy(text,cb){
+  const ta=document.createElement('textarea');ta.value=text;
+  ta.style.position='fixed';ta.style.opacity='0';document.body.appendChild(ta);
+  ta.focus();ta.select();try{document.execCommand('copy')}catch(e){}
+  document.body.removeChild(ta);cb&&cb();
+}
+
+// ════════════ ADMIN: decode a code → full report ════════════
+function showAdmin(){
+  $('S0').classList.add('hidden');
+  $('S1').classList.add('hidden');
+  $('Sdone').classList.add('hidden');
+  $('S2').classList.add('hidden');
+  $('Sadmin').classList.remove('hidden');
+  window.scrollTo({top:0,behavior:'smooth'});
+}
+function adminViewReport(){
+  const raw=$('adminCode').value;
+  const err=$('adminErr');
+  err.style.display='none';
+  let p;
+  try{p=decodeResult(raw);}catch(e){p=null;}
+  if(!p||!Array.isArray(p.a)||!p.a.length){
+    err.textContent='成绩码无效或已损坏，请确认完整粘贴（以 TM 开头）。';
+    err.style.display='block';return;
+  }
+  if(p.wl&&WORDS.length&&p.wl!==WORDS.length){
+    err.textContent='提示：此成绩码来自不同版本的词库，报告可能存在偏差。';
+    err.style.display='block';
+  }
+  restoreFromPayload(p);
+  $('Sadmin').classList.add('hidden');
+  renderReport();
+}
+// Open the admin panel via the URL hash: #admin  (optionally #admin=<code> to auto-load)
+function _checkAdminEntry(){
+  const h=location.hash||'';
+  if(h.indexOf('#admin')!==0)return;
+  showAdmin();
+  const eq=h.indexOf('=');
+  if(eq>=0){
+    $('adminCode').value=decodeURIComponent(h.slice(eq+1));
+    adminViewReport();
+  }
+}
+if(document.readyState==='loading')document.addEventListener('DOMContentLoaded',_checkAdminEntry);
+else _checkAdminEntry();
+
 // ════════════ REPORT ════════════
 function finishTest(){
   clearInterval(Q.tInt);clearInterval(Q.qTimer);
   $('S1').classList.add('hidden');
-  $('S2').classList.remove('hidden');
 
   // Save tested words to cross-session history
   saveHistory(Q.ans.map(a=>a.word.w));
+
+  // The student does NOT see the report. Instead we encode the raw answers into
+  // a result code; only the administrator can decode it (open #admin) to view
+  // the full diagnostic report — creating a follow-up touchpoint with the student.
+  const code=encodeResult(buildPayload());
+  showDone(code);
+}
+
+// Renders the full diagnostic report into #S2 from the current Q / _stu* state.
+// Driven either by a freshly finished test (admin preview) or by a decoded code.
+function renderReport(){
+  $('S2').classList.remove('hidden');
 
   const elapsed=Math.floor((Date.now()-Q.t0)/1000);
   const mm=elapsed/60|0, ss=elapsed%60;

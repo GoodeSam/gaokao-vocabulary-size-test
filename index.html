@@ -1117,17 +1117,15 @@ function renderReport(){
   // Bayesian shrinkage r' = (K*P0 + n*r)/(K+n) pulls small-sample tier rates
   // toward a tier-specific prior (S~high freq, very likely known; C~rare, mostly unknown)
   // so a lucky 1-of-1 on a big tier can't extrapolate into a massive inflated estimate.
-  // Also computes a 95% CI on the total via independent per-tier binomial margins,
-  // and saves rShrunkByTier for the threshold-based studyStartRank rewrite.
+  // Also computes a 95% CI on the total via independent per-tier binomial margins.
   const K_SHRINK=1,P0_BY_TIER={S:0.7,A:0.5,B:0.3,C:0.1},C_CAP_LOW_N=1100;
   const estM={},rShrunkByTier={};
   let totalM=SKIP_TOP, _ciVarSum=0;
   for(const t of TIERS){
     const n=tierCounts[t];
     if(n===0){
-      // No data → no extrapolation. Treat as fully unknown so studyStartRank
-      // (which uses rShrunkByTier) lands here, prompting the student to start
-      // from this tier. Skip the CI margin too (no data, no contribution).
+      // No data → no extrapolation. Treat this tier as fully unknown.
+      // Skip the CI margin too (no data, no contribution).
       estM[t]=0;
       rShrunkByTier[t]=0;
       continue;
@@ -1186,33 +1184,6 @@ function renderReport(){
 
   const mc=v=>v>=75?'var(--ok)':v>=50?'var(--warn)':'var(--err)';
 
-  // ── Find study start rank: first tier whose shrunken mastery rate < threshold ──
-  // Old logic (estM-sum) implicitly assumed mastery is monotone in frequency rank,
-  // so weak-on-S strong-on-C students got told to skip past their high-freq gap.
-  // New logic: walk tiers in frequency order; the first tier where the shrunken rate
-  // drops below STUDY_THRESHOLD is where to focus. That tier's first-rank position
-  // is the recommended study start. _targetTier is null when all tiers passed.
-  const STUDY_THRESHOLD=0.7;
-  let studyStartRank=WORDS.length;
-  let _cumRank=SKIP_TOP;
-  let _targetTier=null;
-  for(const t of TIERS){
-    if(rShrunkByTier[t]<STUDY_THRESHOLD){
-      studyStartRank=_cumRank+1;
-      _targetTier=t;
-      break;
-    }
-    _cumRank+=byTier[t].length;
-  }
-  studyStartRank=Math.min(studyStartRank, WORDS.length);
-  // Build study-message strings tied to the actual gap tier so the UI no longer
-  // hardcodes "优先攻克 S·核心 和 A·常见" when the gap is in B/C or all tiers passed.
-  const _tierFocusName={S:'S·核心 和 A·常见',A:'A·常见 和 B·中频',B:'B·中频',C:'C·低频'};
-  const _tierHeadName={S:'高频',A:'高频',B:'中频',C:'低频'};
-  const _studyHeadline=_targetTier===null?'你已通关：所有频段达标':('第1周：补齐'+_tierHeadName[_targetTier]+'盲区');
-  const _studyMsg=_targetTier===null
-    ?'你的高考词汇已全面达标，建议进入四六级/考研词汇阶段，并保持每日复习节奏防止遗忘。'
-    :('从词频表第 <b>'+studyStartRank+'</b> 位开始，每天学习 20-30 个新词，优先攻克 '+_tierFocusName[_targetTier]+' 层级的薄弱词汇。');
   // Map vocabulary size to grade level
   function vocabToGrade(n){
     if(n>=4200)return'大学四级';if(n>=3500)return'高中3年级';if(n>=2800)return'高中2年级';
@@ -1293,6 +1264,29 @@ function renderReport(){
     </div>
     ${potentialPts>3?`<div style="margin-top:8px;padding:8px 12px;border-radius:8px;background:#fef2f2;font-size:13px;color:#dc2626;font-weight:600">预计提分潜力：+${potentialPts}分（通过精准补齐词汇缺口）</div>`:''}
   </div>`;
+
+  // ══════ 2b. 低于年级水平：学习方法预警卡 ══════
+  // Triggered only when the student's grade is known and their vocab level
+  // lands below it (diff<0). The message reframes the gap as a method problem,
+  // not an effort problem — a hook to discuss method changes with the tutor.
+  if(_stuGrade!=='其他'&&curIdx>=0&&diff<0){
+    h+=`<div class="card fade" style="border:2px solid var(--err);background:#fef2f2">
+      <div class="card-t" style="color:var(--err)">⚠️ 重要提醒：你背单词的方法可能存在重大缺陷</div>
+      <div style="font-size:14px;color:var(--txt);line-height:1.8">
+        你的词汇量<b style="color:var(--err)">低于所在年级应有的水平</b>。这通常<b>不是"背得不够多"</b>，而是——
+        <b style="color:var(--err)">积累单词的方法本身出了问题</b>。
+        <div style="margin-top:8px;padding:10px 12px;background:#fff;border-radius:8px;font-size:13px;color:var(--txt);line-height:1.9">
+          常见的低效信号：<br>
+          · 只按课本/字母顺序死记，不区分高频与低频<br>
+          · 背了就忘，缺少科学的复现与运用<br>
+          · 看得懂却反应慢，无法在考试中即时调用
+        </div>
+        <div style="margin-top:10px;font-weight:700;color:var(--err)">
+          如果继续用同样的方法"更努力地背"，大概率只会重复低效循环。建议尽快找土妹老师诊断你的学习方法，从根本上调整。
+        </div>
+      </div>
+    </div>`;
+  }
 
   // ══════ 3. 核心三分卡 ══════
   h+=`<div class="card fade"><div class="card-t">核心指标</div>
@@ -1382,25 +1376,6 @@ function renderReport(){
     h+=`</div>`;
     window._ww=wrongWords;
   }
-
-  // ══════ 6. 提分路线图卡 ══════
-  h+=`<div class="card fade" style="border-left:4px solid var(--ok)">
-    <div class="card-t" style="color:var(--ok)">你的专属提分路线图</div>
-    <div style="font-size:13px;color:var(--txt);line-height:1.8">
-      <div style="padding:10px 12px;background:#ecfdf5;border-radius:8px;margin-bottom:8px">
-        <b style="color:#10b981">${_studyHeadline}</b><br>
-        <span style="color:var(--gray);font-size:12px">${_studyMsg}</span>
-      </div>
-      <div style="padding:10px 12px;background:#eff6ff;border-radius:8px;margin-bottom:8px">
-        <b style="color:#4361ee">第2-4周：提速训练 + 易混词辨析</b><br>
-        <span style="color:var(--gray);font-size:12px">已掌握的高频词需要提升识别速度（目标：${SLOW_THRESHOLD}s内反应），同时向前复习，优先复习频率较低的已掌握词汇。</span>
-      </div>
-      <div style="padding:10px 12px;background:#faf5ff;border-radius:8px">
-        <b style="color:#7c3aed">持续巩固：定期复测 + 查漏补缺</b><br>
-        <span style="color:var(--gray);font-size:12px">每 2 周复测一次，追踪覆盖率从 ${covScore}% → 95% 的进度，精准补缺。</span>
-      </div>
-    </div>
-  </div>`;
 
   // ══════ 7. 科学依据卡（精简3点） ══════
   h+=`<div class="card fade">

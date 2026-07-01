@@ -15,9 +15,9 @@ DEST="/var/www/wordtest.tumei.online"
 
 [ -f "$KEY" ] || { echo "找不到部署私钥 $KEY"; exit 1; }
 
-echo "同步 index.html -> $HOST:$DEST"
+echo "同步 index.html + 本地库 -> $HOST:$DEST"
 rsync -az -e "ssh -i $KEY -o StrictHostKeyChecking=accept-new" \
-  "$ROOT/index.html" "$HOST:$DEST/index.html"
+  "$ROOT/index.html" "$ROOT/dom-to-image-more.min.js" "$HOST:$DEST/"
 
 ssh -i "$KEY" "$HOST" 'nginx -t >/dev/null 2>&1 && systemctl reload nginx && echo nginx-reloaded'
 echo "✅ 已部署 -> https://wordtest.tumei.online/"

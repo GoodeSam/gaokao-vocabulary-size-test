@@ -210,6 +210,7 @@ table.wlt tr:hover{background:var(--bg)}
 }
 </style>
 <script src="dom-to-image-more.min.js"></script>
+<script src="jspdf.umd.min.js"></script>
 </head>
 <body>
 <div class="ctr">
@@ -1264,6 +1265,12 @@ function renderReport(){
 
   let h='';
 
+  // ══════ 0. 顶部下载按钮 ══════
+  h+=`<button class="btn-share btn-tutor fade" style="margin-bottom:14px" onclick="downloadReport()">
+    <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round"><path d="M21 15v4a2 2 0 01-2 2H5a2 2 0 01-2-2v-4"/><polyline points="7 10 12 15 17 10"/><line x1="12" y1="15" x2="12" y2="3"/></svg>
+    下载PDF报告
+  </button>`;
+
   // ══════ 1. 封面成绩卡（可晒核心） ══════
   h+=`<div class="card fade" style="background:linear-gradient(135deg,#eef0ff,#f5f0ff);border:2px solid var(--primary);text-align:center;padding:28px 22px">
     <div style="font-size:20px;font-weight:800;color:var(--txt)">${_stuName} <span style="font-size:15px;font-weight:700;color:var(--primary);background:var(--primary-lt);padding:3px 12px;border-radius:14px;margin-left:6px">${_stuGrade}</span></div>
@@ -1481,7 +1488,7 @@ function renderReport(){
     <div class="share-btns">
       <button class="btn-share btn-dl" onclick="downloadReport()">
         <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round"><path d="M21 15v4a2 2 0 01-2 2H5a2 2 0 01-2-2v-4"/><polyline points="7 10 12 15 17 10"/><line x1="12" y1="15" x2="12" y2="3"/></svg>
-        下载完整报告长图 → 发朋友圈/小红书
+        下载PDF报告 → 发朋友圈/小红书
       </button>
       <div style="font-size:12px;color:var(--gray);text-align:center;margin:4px 0 8px">
         <b style="color:var(--primary)">公开打卡 = 社交监督</b> · 让朋友见证你的进步
@@ -1710,18 +1717,30 @@ async function downloadReport(){
     canvasSwaps.forEach(({img,cv})=>{
       if(img.parentNode) img.parentNode.replaceChild(cv,img);
     });
-    // Download
-    const a=document.createElement('a');
-    a.href=dataUrl;a.download='高考词汇诊断报告.png';
-    a.click();
-    showShareTip();
+    // Build paginated A4 PDF from the captured image
+    const img=new Image();
+    await new Promise((res,rej)=>{img.onload=res;img.onerror=rej;img.src=dataUrl});
+    const pdf=new jspdf.jsPDF({unit:'mm',format:'a4',compress:true});
+    const pageW=210,pageH=297;
+    const imgW=img.width,imgH=img.height;
+    const pageHpx=Math.floor(imgW*pageH/pageW);
+    const pages=Math.ceil(imgH/pageHpx);
+    const slice=document.createElement('canvas');
+    const sctx=slice.getContext('2d');
+    slice.width=imgW;
+    for(let i=0;i<pages;i++){
+      const sh=Math.min(pageHpx,imgH-i*pageHpx);
+      slice.height=sh;
+      sctx.fillStyle='#ffffff';sctx.fillRect(0,0,imgW,sh);
+      sctx.drawImage(img,0,i*pageHpx,imgW,sh,0,0,imgW,sh);
+      if(i>0)pdf.addPage();
+      pdf.addImage(slice.toDataURL('image/jpeg',0.92),'JPEG',0,0,pageW,sh*pageW/imgW);
+    }
+    pdf.save('高考词汇诊断报告.pdf');
+    showShareTip('pdf');
   }catch(err){
     console.error('Report download failed:',err);
-    // Restore canvas on error too
-    rptEl.querySelectorAll('img[src^="data:image/png"]').forEach(img=>{
-      // already handled in finally
-    });
-    alert('图片生成失败，请重试');
+    alert('PDF生成失败，请重试');
   }finally{
     hdr.remove();ftr.remove();
     hideEls.forEach(el=>el.style.display='');
@@ -1729,11 +1748,13 @@ async function downloadReport(){
   }
 }
 
-function showShareTip(){
+function showShareTip(type){
   // Show a floating tip
   const d=document.createElement('div');
   d.style.cssText='position:fixed;bottom:20px;left:50%;transform:translateX(-50%);background:#0d1117;color:#fff;padding:14px 24px;border-radius:12px;font-size:14px;font-weight:600;z-index:9999;box-shadow:0 4px 20px rgba(0,0,0,.3);text-align:center;max-width:320px';
-  d.innerHTML='图片已保存<br><span style="font-size:12px;color:#8b949e;font-weight:400">打开微信 → 朋友圈 → 选择这张图发布</span>';
+  d.innerHTML=type==='pdf'
+    ?'PDF报告已保存<br><span style="font-size:12px;color:#8b949e;font-weight:400">可发送给老师/家长，或分享到朋友圈</span>'
+    :'图片已保存<br><span style="font-size:12px;color:#8b949e;font-weight:400">打开微信 → 朋友圈 → 选择这张图发布</span>';
   document.body.appendChild(d);
   setTimeout(()=>d.remove(),4000);
 }

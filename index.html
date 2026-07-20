@@ -438,6 +438,15 @@ const _skipWords=new Set(WORDS.slice(0,SKIP_TOP).map(w=>w.w));
 const byTier={S:[],A:[],B:[],C:[]};
 WORDS.forEach(w=>{if(byTier[w.tier]&&!_skipWords.has(w.w))byTier[w.tier].push(w)});
 
+// ════════════ 背词计划 PDF 排版参数 ════════════
+// 单词书 PDF 由 WORDS（4484词，按考试词频降序排列）现场生成，而非依赖外部
+// 排版不固定的旧版 PDF —— 这样"第N位词落在第几页"可以用固定公式精确换算。
+const WORDBOOK_PER_PAGE=25;   // 每页固定词数（含表头，行高固定，保证每页词数恒定）
+const WORDBOOK_HOOK_PAGES=1;  // 封面/钩子页数，排在正文词表之前
+function wordbookPageOf(rank){ // rank: 1-based 位次 → 该词所在页码
+  return WORDBOOK_HOOK_PAGES+Math.ceil(Math.max(1,rank)/WORDBOOK_PER_PAGE);
+}
+
 // ════════════ QUIZ STATE ════════════
 let Q={
   qs:[], cur:0, ans:[], t0:0, tInt:null,
@@ -1361,6 +1370,28 @@ function renderReport(){
     </div>`;
   }
 
+  // ══════ 2c. 背词起点建议卡 ══════
+  // totalM 近似为"按词频从高到低，已掌握到第几位"——与词表本身按词频降序排列
+  // 的顺序一致，因此可以直接用作背词计划 PDF 里的起始位次。
+  const wbStartRank=Math.min(WORDS.length,totalM+1);
+  const wbStartPage=wordbookPageOf(wbStartRank);
+  const wbPageIdx=Math.ceil(wbStartRank/WORDBOOK_PER_PAGE);
+  const wbRangeLo=(wbPageIdx-1)*WORDBOOK_PER_PAGE+1;
+  const wbRangeHi=Math.min(WORDS.length,wbPageIdx*WORDBOOK_PER_PAGE);
+  h+=`<div class="card fade" style="border:2px solid #7c3aed;background:linear-gradient(135deg,#f5f3ff,#eef2ff)">
+    <div class="card-t" style="color:#7c3aed">📖 背词起点建议</div>
+    <div style="font-size:14px;color:var(--txt);line-height:1.8">
+      根据本次测试，你已基本掌握约 <b>${totalM}</b> 个高频词。为避免重复背诵已掌握的词、把时间花在真正的短板上，
+      建议直接从《土妹高考词汇背词计划》PDF 的
+      <b style="color:#7c3aed;font-size:17px">第 ${wbStartPage} 页</b>
+      （约第 ${wbRangeLo}–${wbRangeHi} 位词）开始背。
+    </div>
+    <button class="btn-share btn-tutor" style="width:100%;margin-top:10px" onclick="downloadWordbook(${wbStartRank})">
+      <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round"><path d="M21 15v4a2 2 0 01-2 2H5a2 2 0 01-2-2v-4"/><polyline points="7 10 12 15 17 10"/><line x1="12" y1="15" x2="12" y2="3"/></svg>
+      下载专属背词计划PDF（已标记起点）
+    </button>
+  </div>`;
+
   // ══════ 3. 核心三分卡 ══════
   h+=`<div class="card fade"><div class="card-t">核心指标</div>
     <div style="display:grid;grid-template-columns:1fr 1fr 1fr;gap:10px;margin:10px 0">
@@ -1745,6 +1776,135 @@ async function downloadReport(){
     hdr.remove();ftr.remove();
     hideEls.forEach(el=>el.style.display='');
     window.scrollTo(0,savedScroll);
+  }
+}
+
+// ════════════ 背词计划 PDF 生成（离屏逐页渲染，固定排版保证页码可精确换算） ════════════
+const WB_WIDTH=700; // 离屏渲染容器宽度(css px)
+const WB_PAGE_H=Math.round(WB_WIDTH*297/210); // 与 A4 比例一致的单页高度(css px)
+
+function wbRow(w,rank){
+  const cn=w.cn.split('\n')[0];
+  const bc='badge-'+w.tier.toLowerCase();
+  return `<div style="display:flex;align-items:center;gap:8px;height:32px;border-bottom:1px solid #eef0f5;font-size:12.5px">
+    <div style="width:34px;color:#94a3b8;font-size:11px;text-align:right;flex-shrink:0">${rank}</div>
+    <div style="width:92px;font-weight:700;color:#1e293b;overflow:hidden;white-space:nowrap;text-overflow:ellipsis;flex-shrink:0">${w.w}</div>
+    <div style="width:100px;color:#64748b;font-size:11px;overflow:hidden;white-space:nowrap;text-overflow:ellipsis;flex-shrink:0">${w.p}</div>
+    <div style="flex:1;color:#334155;overflow:hidden;white-space:nowrap;text-overflow:ellipsis">${cn}</div>
+    <span class="badge ${bc}" style="flex-shrink:0">${w.tier}</span>
+  </div>`;
+}
+
+function buildWbHookPage(stuName,startPage,startLo,startHi,totalPages){
+  const el=document.createElement('div');
+  el.style.cssText=`width:${WB_WIDTH}px;height:${WB_PAGE_H}px;box-sizing:border-box;background:#fff;padding:32px 30px;font-family:-apple-system,'PingFang SC','Microsoft YaHei',sans-serif;overflow:hidden`;
+  el.innerHTML=`
+    <div style="text-align:center;margin-bottom:16px">
+      <div style="font-size:22px;font-weight:900;color:#4361ee">土妹高考词汇背词计划</div>
+      <div style="font-size:12px;color:#94a3b8;margin-top:4px">按84套全国高考真题词频降序排列 · 共 ${WORDS.length} 词 · 共 ${totalPages} 页</div>
+    </div>
+    <div style="background:linear-gradient(135deg,#f5f3ff,#eef2ff);border:2px solid #7c3aed;border-radius:12px;padding:16px 18px;margin-bottom:14px;text-align:center">
+      <div style="font-size:12.5px;color:#64748b">${stuName?stuName+'，':''}根据本次诊断测试，建议你从</div>
+      <div style="font-size:26px;font-weight:900;color:#7c3aed;margin:4px 0">第 ${startPage} 页</div>
+      <div style="font-size:12px;color:#64748b">（第 ${startLo}–${startHi} 位词）开始背 · 前面的高频词你已基本掌握</div>
+    </div>
+    <div style="background:#f8fafc;border-radius:10px;padding:14px 16px;margin-bottom:14px">
+      <div style="font-size:13px;font-weight:800;color:#1e293b;margin-bottom:6px">这份词表怎么用</div>
+      <div style="font-size:11.5px;color:#475569;line-height:1.9">
+        · 词按<b>考试出现频率从高到低</b>排列，越靠前的词越常考，优先级越高<br>
+        · S/A/B/C 为频段标记，S 最高频、C 最低频，可作为复习优先级参考<br>
+        · 建议按频段每天固定数量推进，并按科学间隔重复复习，而不是从头背到尾
+      </div>
+    </div>
+    <div style="display:flex;align-items:center;gap:16px;background:#fff;border:1.5px solid #e2e8f0;border-radius:10px;padding:14px 16px">
+      <img src="${WECHAT_QR}" style="width:80px;height:auto;border-radius:8px;flex-shrink:0">
+      <div style="font-size:11.5px;color:#1e293b;line-height:1.8">
+        <div style="font-weight:800;color:#4361ee;font-size:13px;margin-bottom:2px">用对的方法，背对的单词</div>
+        <div>加土妹微信，回复<b style="color:#4361ee">"背单词"</b>，</div>
+        <div>免费领取完整的科学记忆方法讲解</div>
+        <div style="color:#94a3b8;margin-top:2px">土妹英语番茄老师 · 所在地：广州</div>
+      </div>
+    </div>`;
+  return el;
+}
+
+function buildWbWordPage(pageNum,lo,hi,isStart){
+  const el=document.createElement('div');
+  el.style.cssText=`width:${WB_WIDTH}px;height:${WB_PAGE_H}px;box-sizing:border-box;background:#fff;padding:24px 28px;font-family:-apple-system,'PingFang SC','Microsoft YaHei',sans-serif;overflow:hidden`;
+  let rows='';
+  for(let r=lo;r<=hi;r++) rows+=wbRow(WORDS[r-1],r);
+  el.innerHTML=`
+    <div style="display:flex;justify-content:space-between;align-items:baseline;margin-bottom:6px;border-bottom:2px solid #4361ee;padding-bottom:6px">
+      <div style="font-size:13px;font-weight:800;color:#4361ee">土妹高考词汇背词计划</div>
+      <div style="font-size:11px;color:#94a3b8">第 ${pageNum} 页 · 第 ${lo}–${hi} 位</div>
+    </div>
+    ${isStart?`<div style="background:#7c3aed;color:#fff;font-size:12px;font-weight:800;text-align:center;padding:6px;border-radius:6px;margin-bottom:6px">★ 建议从这里开始背</div>`:''}
+    <div style="display:flex;gap:8px;font-size:10.5px;color:#94a3b8;padding:2px 0 4px;border-bottom:1px solid #eef0f5">
+      <div style="width:34px;text-align:right;flex-shrink:0">位次</div>
+      <div style="width:92px;flex-shrink:0">单词</div>
+      <div style="width:100px;flex-shrink:0">音标</div>
+      <div style="flex:1">释义</div>
+      <div style="width:20px;flex-shrink:0">层级</div>
+    </div>
+    ${rows}`;
+  return el;
+}
+
+async function downloadWordbook(startRank){
+  const totalWords=WORDS.length;
+  const totalContentPages=Math.ceil(totalWords/WORDBOOK_PER_PAGE);
+  const totalPages=WORDBOOK_HOOK_PAGES+totalContentPages;
+  const startPage=wordbookPageOf(startRank);
+  const startPageIdx=Math.ceil(startRank/WORDBOOK_PER_PAGE);
+  const startLo=(startPageIdx-1)*WORDBOOK_PER_PAGE+1;
+  const startHi=Math.min(totalWords,startPageIdx*WORDBOOK_PER_PAGE);
+
+  const tip=document.createElement('div');
+  tip.style.cssText='position:fixed;bottom:20px;left:50%;transform:translateX(-50%);background:#0d1117;color:#fff;padding:14px 24px;border-radius:12px;font-size:14px;font-weight:600;z-index:9999;box-shadow:0 4px 20px rgba(0,0,0,.3);text-align:center';
+  tip.textContent='正在生成PDF · 0/'+totalPages+' 页';
+  document.body.appendChild(tip);
+
+  const host=document.createElement('div');
+  host.style.cssText='position:fixed;left:-99999px;top:0;z-index:-1';
+  document.body.appendChild(host);
+
+  try{
+    if(document.fonts&&document.fonts.ready)await document.fonts.ready;
+    const pdf=new jspdf.jsPDF({unit:'mm',format:'a4',compress:true});
+    const scale=1.5;
+    const capture=async(el)=>{
+      host.innerHTML='';
+      host.appendChild(el);
+      await new Promise(r=>requestAnimationFrame(()=>requestAnimationFrame(r)));
+      return domtoimage.toJpeg(el,{
+        width:WB_WIDTH*scale,height:WB_PAGE_H*scale,
+        style:{transform:'scale('+scale+')',transformOrigin:'top left',width:WB_WIDTH+'px',height:WB_PAGE_H+'px'},
+        bgcolor:'#ffffff',cacheBust:true,quality:0.92
+      });
+    };
+
+    let done=0;
+    const hookUrl=await capture(buildWbHookPage(_stuName,startPage,startLo,startHi,totalPages));
+    pdf.addImage(hookUrl,'JPEG',0,0,210,297);
+    done++;tip.textContent='正在生成PDF · '+done+'/'+totalPages+' 页';
+
+    for(let p=1;p<=totalContentPages;p++){
+      const lo=(p-1)*WORDBOOK_PER_PAGE+1;
+      const hi=Math.min(totalWords,p*WORDBOOK_PER_PAGE);
+      const pageNum=WORDBOOK_HOOK_PAGES+p;
+      const url=await capture(buildWbWordPage(pageNum,lo,hi,pageNum===startPage));
+      pdf.addPage();
+      pdf.addImage(url,'JPEG',0,0,210,297);
+      done++;
+      if(done%5===0||done===totalPages) tip.textContent='正在生成PDF · '+done+'/'+totalPages+' 页';
+    }
+    pdf.save('土妹高考词汇背词计划.pdf');
+  }catch(err){
+    console.error('Wordbook download failed:',err);
+    alert('PDF生成失败，请重试');
+  }finally{
+    host.remove();
+    tip.remove();
   }
 }
 

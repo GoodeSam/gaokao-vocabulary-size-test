@@ -1738,6 +1738,23 @@ async function downloadReport(){
     const elW=rptEl.scrollWidth;
     const elH=rptEl.scrollHeight;
     const scale=2;
+    const pageW=210,pageH=297;
+    const pageHpx=Math.floor(elW*scale*pageH/pageW);
+    // Record block boundaries (in captured-image pixel space) so page breaks can be nudged
+    // into the gaps between cards instead of slicing through one. Uses getBoundingClientRect
+    // (not offsetTop, which is offsetParent-relative and unreliable across nesting) to stay
+    // exact relative to rptEl. Descends into a card's own children when the card itself is
+    // taller than one page, so a break can still land between its title/paragraph/list parts.
+    const rptTop=rptEl.getBoundingClientRect().top;
+    function collectRanges(el){
+      const top=(el.getBoundingClientRect().top-rptTop)*scale;
+      const bottom=top+el.offsetHeight*scale;
+      if(bottom<=top)return[];
+      if(bottom-top<=pageHpx||el.children.length===0)return[[top,bottom]];
+      const nested=Array.from(el.children).flatMap(collectRanges);
+      return nested.length?nested:[[top,bottom]];
+    }
+    const blockRanges=Array.from(rptEl.children).flatMap(collectRanges);
     const dataUrl=await domtoimage.toPng(rptEl,{
       width:elW*scale,
       height:elH*scale,
@@ -1758,20 +1775,31 @@ async function downloadReport(){
     const img=new Image();
     await new Promise((res,rej)=>{img.onload=res;img.onerror=rej;img.src=dataUrl});
     const pdf=new jspdf.jsPDF({unit:'mm',format:'a4',compress:true});
-    const pageW=210,pageH=297;
     const imgW=img.width,imgH=img.height;
-    const pageHpx=Math.floor(imgW*pageH/pageW);
-    const pages=Math.ceil(imgH/pageHpx);
+    // Pick each page's end so it lands in a gap between cards, not through one —
+    // only falls back to a hard cut when a single card is taller than one whole page.
+    function pickPageEnd(start){
+      const maxEnd=Math.min(imgH,start+pageHpx);
+      for(const[bt,bb]of blockRanges){
+        if(bt<maxEnd&&maxEnd<bb){
+          return bt>start?bt:maxEnd;
+        }
+      }
+      return maxEnd;
+    }
     const slice=document.createElement('canvas');
     const sctx=slice.getContext('2d');
     slice.width=imgW;
-    for(let i=0;i<pages;i++){
-      const sh=Math.min(pageHpx,imgH-i*pageHpx);
+    let start=0,pageIdx=0;
+    while(start<imgH){
+      const end=Math.max(pickPageEnd(start),start+1);
+      const sh=end-start;
       slice.height=sh;
       sctx.fillStyle='#ffffff';sctx.fillRect(0,0,imgW,sh);
-      sctx.drawImage(img,0,i*pageHpx,imgW,sh,0,0,imgW,sh);
-      if(i>0)pdf.addPage();
+      sctx.drawImage(img,0,start,imgW,sh,0,0,imgW,sh);
+      if(pageIdx>0)pdf.addPage();
       pdf.addImage(slice.toDataURL('image/jpeg',0.92),'JPEG',0,0,pageW,sh*pageW/imgW);
+      start=end;pageIdx++;
     }
     pdf.save('高考词汇诊断报告.pdf');
     showShareTip('pdf');

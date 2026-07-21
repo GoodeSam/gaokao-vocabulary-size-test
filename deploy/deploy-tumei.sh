@@ -17,7 +17,7 @@ DEST="/var/www/wordtest.tumei.online"
 
 echo "同步 index.html + 本地库 -> $HOST:$DEST"
 rsync -az -e "ssh -i $KEY -o StrictHostKeyChecking=accept-new" \
-  "$ROOT/index.html" "$ROOT/dom-to-image-more.min.js" "$HOST:$DEST/"
+  "$ROOT/index.html" "$ROOT/dom-to-image-more.min.js" "$ROOT/jspdf.umd.min.js" "$HOST:$DEST/"
 
 ssh -i "$KEY" "$HOST" 'nginx -t >/dev/null 2>&1 && systemctl reload nginx && echo nginx-reloaded'
 echo "✅ 已部署 -> https://wordtest.tumei.online/"
